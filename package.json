@@ -1,0 +1,52 @@
+{
+  "name": "agora-backend",
+  "version": "1.0.0",
+  "description": "Ethereum dApp backend with AI Oracle for winner determination",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "start": "node dist/index.js",
+    "test": "jest",
+    "lint": "eslint . --ext .ts",
+    "typecheck": "tsc --noEmit",
+    "encrypt-key": "ts-node scripts/encryptPrivateKey.ts"
+  },
+  "keywords": ["ethereum", "oracle", "ai", "blockchain"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "ethers": "^6.9.0",
+    "express": "^4.18.2",
+    "inversify": "^6.0.2",
+    "reflect-metadata": "^0.2.1",
+    "dotenv": "^16.3.1",
+    "jsonwebtoken": "^9.0.2",
+    "bcrypt": "^5.1.1",
+    "joi": "^17.11.0",
+    "express-rate-limit": "^7.1.5",
+    "helmet": "^7.1.0",
+    "cors": "^2.8.5",
+    "winston": "^3.11.0",
+    "mongodb": "^6.3.0",
+    "openai": "^4.24.1",
+    "async-mutex": "^0.4.1",
+    "crypto-js": "^4.2.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.10.5",
+    "@typescript-eslint/eslint-plugin": "^6.15.0",
+    "@typescript-eslint/parser": "^6.15.0",
+    "eslint": "^8.56.0",
+    "jest": "^29.7.0",
+    "@types/jest": "^29.5.11",
+    "ts-jest": "^29.1.1",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.3.3",
+    "@types/jsonwebtoken": "^9.0.5",
+    "@types/bcrypt": "^5.0.2",
+    "@types/cors": "^2.8.17",
+    "@types/crypto-js": "^4.2.1"
+  }
+}
