@@ -67,7 +67,7 @@ export class JwtService {
     try {
       return jwt.verify(token, this.accessTokenSecret) as JwtPayload;
     } catch (error) {
-      logger.warn('Invalid access token', { error: error.message });
+      logger.warn('Invalid access token', { error: error instanceof Error ? error.message : 'Unknown error' });
       throw AppError.unauthorized('Invalid access token');
     }
   }
@@ -76,7 +76,7 @@ export class JwtService {
     try {
       return jwt.verify(token, this.refreshTokenSecret) as JwtPayload;
     } catch (error) {
-      logger.warn('Invalid refresh token', { error: error.message });
+      logger.warn('Invalid refresh token', { error: error instanceof Error ? error.message : 'Unknown error' });
       throw AppError.unauthorized('Invalid refresh token');
     }
   }

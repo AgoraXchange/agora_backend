@@ -7,6 +7,7 @@ import { ICommitteeService } from '../../domain/services/ICommitteeService';
 import { IBlockchainService } from '../../domain/services/IBlockchainService';
 import { OracleDecision } from '../../domain/entities/OracleDecision';
 import { ContractStatus } from '../../domain/entities/Contract';
+import { Choice, ChoiceConverter } from '../../domain/entities/Choice';
 import { logger } from '../../infrastructure/logging/Logger';
 
 export interface DecideWinnerInput {
@@ -89,7 +90,7 @@ export class DecideWinnerUseCase {
       const useCommittee = this.shouldUseCommitteeMode(input);
       const deliberationMode = useCommittee ? 'committee' : 'single_ai';
 
-      logger.info('Decision mode determined', { 
+      logger.info('Decision mode determined', {
         contractId: input.contractId,
         mode: deliberationMode,
         forceCommittee: input.forceCommitteeMode
@@ -223,11 +224,21 @@ export class DecideWinnerUseCase {
         consensusLevel: committeeResult.deliberationMetrics.consensusLevel
       });
 
-      // Submit to blockchain
-      const txHash = await this.blockchainService.submitWinnerDecision(
-        contract.contractAddress,
+      // Convert winnerId to Choice enum for blockchain submission
+      const winnerChoice = ChoiceConverter.fromPartyId(
         committeeResult.winnerId,
-        proof
+        contract.partyA.id,
+        contract.partyB.id
+      );
+
+      if (winnerChoice === Choice.NONE) {
+        throw new Error('Invalid winner ID: must be either party A or party B');
+      }
+
+      // Submit to blockchain using new declareWinner method
+      const txHash = await this.blockchainService.declareWinner(
+        contract.id,
+        winnerChoice
       );
 
       // Update contract
@@ -296,10 +307,21 @@ export class DecideWinnerUseCase {
         deliberationMode: 'single_ai'
       });
 
-      const txHash = await this.blockchainService.submitWinnerDecision(
-        contract.contractAddress,
+      // Convert winnerId to Choice enum for blockchain submission
+      const winnerChoice = ChoiceConverter.fromPartyId(
         aiResult.winnerId,
-        proof
+        contract.partyA.id,
+        contract.partyB.id
+      );
+
+      if (winnerChoice === Choice.NONE) {
+        throw new Error('Invalid winner ID: must be either party A or party B');
+      }
+
+      // Submit to blockchain using new declareWinner method
+      const txHash = await this.blockchainService.declareWinner(
+        contract.id,
+        winnerChoice
       );
 
       contract.setWinner(aiResult.winnerId);

@@ -1,4 +1,5 @@
 import { Party } from './Party';
+import { BettingStats } from './BettingStats';
 
 export enum ContractStatus {
   CREATED = 'CREATED',
@@ -17,7 +18,11 @@ export class Contract {
     public readonly bettingEndTime: Date,
     public readonly winnerRewardPercentage: number,
     public status: ContractStatus,
-    public winnerId?: string
+    public winnerId?: string,
+    public readonly creator?: string,
+    public readonly topic?: string,
+    public readonly description?: string,
+    public bettingStats?: BettingStats
   ) {}
 
   isBettingOpen(): boolean {
