@@ -112,12 +112,19 @@ Please conduct a comprehensive multi-perspective analysis to determine which par
 
       // Parse Gemini's response
       const response = result.response;
-      const textContent = response.text();
+      let textContent = response.text();
       let responseContent: any;
+      
+      // Remove markdown code blocks if present
+      if (textContent.includes('```json')) {
+        textContent = textContent.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+      } else if (textContent.includes('```')) {
+        textContent = textContent.replace(/```\n?/g, '');
+      }
       
       try {
         // Try to parse as JSON
-        responseContent = JSON.parse(textContent);
+        responseContent = JSON.parse(textContent.trim());
       } catch (parseError) {
         logger.warn('Failed to parse Gemini response as JSON, using text content', { 
           error: parseError instanceof Error ? parseError.message : 'Unknown parse error' 

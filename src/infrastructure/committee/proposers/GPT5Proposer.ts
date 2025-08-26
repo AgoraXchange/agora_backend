@@ -98,11 +98,9 @@ Based on your analysis, which party should be declared the winner? Provide your 
             content: prompt
           }
         ],
-        temperature: temperature,
+        temperature: 1, // GPT-5 only supports temperature 1
         max_completion_tokens: this.config.maxTokens,
-        top_p: this.config.topP,
-        frequency_penalty: this.config.frequencyPenalty,
-        presence_penalty: this.config.presencePenalty,
+        // GPT-5 doesn't support top_p, frequency_penalty, presence_penalty
         response_format: { type: 'json_object' } // Force JSON response
       });
 
