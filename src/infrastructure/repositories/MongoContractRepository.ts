@@ -3,6 +3,7 @@ import { Collection } from 'mongodb';
 import { IContractRepository } from '../../domain/repositories/IContractRepository';
 import { Contract, ContractStatus } from '../../domain/entities/Contract';
 import { Party } from '../../domain/entities/Party';
+import { BettingStats } from '../../domain/entities/BettingStats';
 import { MongoDBConnection } from '../database/MongoDBConnection';
 import { logger } from '../logging/Logger';
 
@@ -25,6 +26,10 @@ interface ContractDocument {
   winnerRewardPercentage: number;
   status: ContractStatus;
   winnerId?: string;
+  creator?: string;
+  topic?: string;
+  description?: string;
+  bettingStats?: BettingStats;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -114,7 +119,11 @@ export class MongoContractRepository implements IContractRepository {
       doc.bettingEndTime,
       doc.winnerRewardPercentage,
       doc.status,
-      doc.winnerId
+      doc.winnerId,
+      doc.creator,
+      doc.topic,
+      doc.description,
+      doc.bettingStats
     );
   }
 
@@ -138,6 +147,10 @@ export class MongoContractRepository implements IContractRepository {
       winnerRewardPercentage: contract.winnerRewardPercentage,
       status: contract.status,
       winnerId: contract.winnerId,
+      creator: contract.creator,
+      topic: contract.topic,
+      description: contract.description,
+      bettingStats: contract.bettingStats,
       createdAt: new Date(),
       updatedAt: new Date()
     };

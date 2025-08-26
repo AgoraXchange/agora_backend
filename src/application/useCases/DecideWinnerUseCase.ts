@@ -6,6 +6,7 @@ import { IAIService } from '../../domain/services/IAIService';
 import { IBlockchainService } from '../../domain/services/IBlockchainService';
 import { OracleDecision } from '../../domain/entities/OracleDecision';
 import { ContractStatus } from '../../domain/entities/Contract';
+import { Choice, ChoiceConverter } from '../../domain/entities/Choice';
 import { logger } from '../../infrastructure/logging/Logger';
 
 export interface DecideWinnerInput {
@@ -76,16 +77,20 @@ export class DecideWinnerUseCase {
 
       await this.decisionRepository.save(decision);
 
-      const proof = JSON.stringify({
-        decisionId: decision.id,
-        confidence: decision.metadata.confidence,
-        reasoning: decision.metadata.reasoning
-      });
-
-      const txHash = await this.blockchainService.submitWinnerDecision(
-        contract.contractAddress,
+      // Convert winnerId to Choice enum for blockchain submission
+      const winnerChoice = ChoiceConverter.fromPartyId(
         aiResult.winnerId,
-        proof
+        contract.partyA.id,
+        contract.partyB.id
+      );
+
+      if (winnerChoice === Choice.NONE) {
+        throw new Error('Invalid winner ID: must be either party A or party B');
+      }
+
+      const txHash = await this.blockchainService.declareWinner(
+        contract.id,
+        winnerChoice
       );
 
       contract.setWinner(aiResult.winnerId);

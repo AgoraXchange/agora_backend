@@ -59,7 +59,7 @@ async function startServer() {
     // Start contract monitoring
     startContractMonitoring();
   } catch (error) {
-    logger.error('Failed to start server', { error: error.message });
+    logger.error('Failed to start server', { error: error instanceof Error ? error.message : 'Unknown error' });
     throw error;
   }
 }
@@ -73,7 +73,7 @@ function startContractMonitoring() {
     try {
       await monitorUseCase.execute();
     } catch (error) {
-      logger.error('Monitoring error', { error: error.message });
+      logger.error('Monitoring error', { error: error instanceof Error ? error.message : 'Unknown error' });
     }
   }, MONITORING_INTERVAL);
 
