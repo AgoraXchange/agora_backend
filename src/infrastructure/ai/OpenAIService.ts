@@ -17,7 +17,7 @@ export class OpenAIService implements IAIService {
     }
 
     this.openai = new OpenAI({ apiKey });
-    this.model = process.env.OPENAI_MODEL || 'gpt-4-turbo-preview';
+    this.model = process.env.OPENAI_MODEL || 'gpt-4o';
   }
 
   async analyzeAndDecideWinner(input: AIAnalysisInput): Promise<AIAnalysisResult> {
@@ -80,6 +80,22 @@ export class OpenAIService implements IAIService {
   }
 
   private async callOpenAI(prompt: string): Promise<any> {
+    // Check if we should use mock mode
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (process.env.OPENAI_FALLBACK_TO_MOCK === 'true' || !apiKey || apiKey.includes('mock')) {
+      logger.debug('Using mock OpenAI response (mock mode enabled)');
+      return {
+        winner: Math.random() > 0.5 ? 'A' : 'B',
+        confidence: 0.85 + Math.random() * 0.15,
+        reasoning: 'Mock analysis due to mock mode',
+        dataPoints: {
+          factor1: 'Mock performance metrics',
+          factor2: 'Mock historical data',
+          factor3: 'Mock current conditions'
+        }
+      };
+    }
+    
     try {
       logger.info('Calling OpenAI API for winner analysis');
       
@@ -96,7 +112,7 @@ export class OpenAIService implements IAIService {
           }
         ],
         temperature: 0.7,
-        max_tokens: 500,
+        max_completion_tokens: 500,
         response_format: { type: 'json_object' }
       });
 

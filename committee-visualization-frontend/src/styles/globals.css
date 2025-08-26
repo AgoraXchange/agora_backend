@@ -1,0 +1,132 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-chat-bg text-message-text;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+  }
+}
+
+@layer components {
+  .chat-message {
+    @apply p-3 m-2 rounded-2xl max-w-xs shadow-lg;
+  }
+
+  .chat-message-left {
+    @apply bg-message-bubble ml-4 mr-auto;
+  }
+
+  .chat-message-right {
+    @apply bg-agent-gpt4 ml-auto mr-4;
+  }
+
+  .agent-avatar {
+    @apply w-10 h-10 rounded-full flex items-center justify-center text-white text-lg font-bold shadow-lg;
+  }
+
+  .agent-badge {
+    @apply px-2 py-1 rounded-full text-xs font-medium;
+  }
+
+  .typing-indicator {
+    @apply inline-block w-2 h-2 rounded-full bg-gray-400 animate-pulse;
+  }
+
+  .typing-indicator:nth-child(1) {
+    animation-delay: 0s;
+  }
+
+  .typing-indicator:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+
+  .typing-indicator:nth-child(3) {
+    animation-delay: 0.4s;
+  }
+
+  .progress-bar {
+    @apply w-full bg-progress-bg rounded-full h-2 overflow-hidden;
+  }
+
+  .progress-fill {
+    @apply bg-progress-fill h-full transition-all duration-500 ease-out;
+  }
+
+  .btn-primary {
+    @apply bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .card {
+    @apply bg-message-bubble rounded-xl p-4 shadow-lg;
+  }
+}
+
+@layer utilities {
+  .fade-in {
+    animation: fadeIn 0.5s ease-out;
+  }
+
+  .slide-up {
+    animation: slideUp 0.3s ease-out;
+  }
+
+  .animate-typing {
+    animation: typing 2s infinite;
+  }
+
+  .animate-fadeIn {
+    animation: fadeIn 0.3s ease-in;
+  }
+
+  .line-clamp-2 {
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Scrollbar styling */
+.chat-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.chat-container::-webkit-scrollbar-track {
+  background: #1e1e1e;
+}
+
+.chat-container::-webkit-scrollbar-thumb {
+  background: #4b5563;
+  border-radius: 3px;
+}
+
+.chat-container::-webkit-scrollbar-thumb:hover {
+  background: #6b7280;
+}
