@@ -4,6 +4,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { createOracleRoutes } from './interfaces/routes/oracleRoutes';
 import { createAuthRoutes } from './interfaces/routes/authRoutes';
+import { createDeliberationRoutes } from './interfaces/routes/deliberationRoutes';
 import { errorHandler, notFoundHandler } from './interfaces/middleware/errorMiddleware';
 import { apiRateLimiter } from './interfaces/middleware/rateLimitMiddleware';
 import { logger } from './infrastructure/logging/Logger';
@@ -27,10 +28,18 @@ export function createApp() {
 
   // CORS configuration
   app.use(cors({
-    origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'],
+    origin: process.env.ALLOWED_ORIGINS?.split(',') || [
+      'http://localhost:3000',
+      'http://localhost:5173', // Vite frontend default
+      'http://localhost:5174', // Vite frontend alternative port
+      'http://127.0.0.1:5173', // Alternative localhost
+      'http://127.0.0.1:5174'  // Alternative localhost with alt port
+    ],
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
+    exposedHeaders: ['Content-Length', 'X-Request-ID'],
+    maxAge: 86400, // 24 hours preflight cache
   }));
 
   // Body parser middleware
@@ -63,6 +72,7 @@ export function createApp() {
   // API routes
   app.use('/api/auth', createAuthRoutes());
   app.use('/api/oracle', createOracleRoutes());
+  app.use('/api/deliberations', createDeliberationRoutes());
 
   // 404 handler
   app.use(notFoundHandler);
