@@ -14,8 +14,12 @@
 ## 주요 기능
 
 - 스마트 컨트랙트의 베팅 종료 시점 모니터링
-- AI를 통한 당사자 A/B 중 승자 결정
-- 블록체인에 승자 정보 제출
+- **위원회 기반 AI 결정 시스템**: MoA(Mixture-of-Agents) + LLM-as-Judge 아키텍처
+  - 다중 AI 에이전트의 협의 및 토론을 통한 승자 결정
+  - GPT-4, Claude, Gemini 등 다양한 AI 모델 활용
+  - 규칙 기반 + LLM 기반 심사 시스템
+  - 가중 투표, 보르다 카운트, 다수결 등 다양한 합의 메커니즘
+- 블록체인에 승자 정보 제출 (상세한 위원회 결정 증명 포함)
 - RESTful API 제공
 - 실시간 로깅 및 모니터링
 - Graceful Shutdown 지원
@@ -27,13 +31,26 @@
 ```
 src/
 ├── domain/           # 엔티티, 비즈니스 규칙, 인터페이스 정의
-│   ├── entities/     # Contract, Party, OracleDecision
+│   ├── entities/     # Contract, Party, OracleDecision, CommitteeDecision, AgentProposal
 │   ├── repositories/ # 레포지토리 인터페이스
-│   └── services/     # 외부 서비스 인터페이스
+│   ├── services/     # ICommitteeService, IAgentService, IAIService 등
+│   └── valueObjects/ # ConsensusResult, ProposalMetadata
 ├── application/      # 유스케이스, 비즈니스 로직
-│   └── useCases/     # DecideWinnerUseCase, MonitorContractsUseCase
+│   └── useCases/     # DecideWinnerUseCase (단일 AI + 위원회 모드), MonitorContractsUseCase
 ├── infrastructure/   # 외부 시스템 구현체
-│   ├── ai/          # AI 서비스 구현
+│   ├── committee/   # 위원회 시스템
+│   │   ├── CommitteeOrchestrator.ts      # 전체 오케스트레이션
+│   │   ├── proposers/                    # AI 에이전트들
+│   │   │   ├── GPT4Proposer.ts
+│   │   │   ├── ClaudeProposer.ts
+│   │   │   └── GeminiProposer.ts
+│   │   ├── judges/                       # 심사 시스템
+│   │   │   ├── RuleBasedJudge.ts         # 규칙 기반 심사
+│   │   │   ├── LLMJudge.ts              # LLM 기반 심사
+│   │   │   └── CommitteeJudgeService.ts  # 통합 심사 서비스
+│   │   └── synthesizer/                  # 합의 생성
+│   │       └── ConsensusSynthesizer.ts
+│   ├── ai/          # 기존 단일 AI 서비스
 │   ├── blockchain/  # 이더리움 통신
 │   └── repositories/# 레포지토리 구현
 └── interfaces/       # 외부 인터페이스
@@ -197,6 +214,172 @@ npm test
 4. **MongoDB**: 프로덕션에서는 `USE_MONGODB=true` 설정 권장
 5. **Rate Limiting**: 서비스 특성에 맞게 조정
 6. **로그 관리**: 로그 파일 크기 및 로테이션 설정 확인
+
+## 🤖 위원회 기반 AI 결정 시스템 (MoA + LLM-as-Judge)
+
+### 시스템 개요
+
+본 시스템은 **MoA(Mixture-of-Agents)**와 **LLM-as-Judge** 기법을 결합하여 단일 AI의 한계를 극복하고, 다중 AI 에이전트의 협의와 심사를 통해 더 정확하고 신뢰할 수 있는 결정을 내리는 위원회 기반 오라클 시스템입니다.
+
+### 아키텍처 구조
+
+```
+┌─────────────── 1층: 제안자(Proposers) ───────────────┐
+│  GPT-4        Claude        Gemini    (다양한 관점/샘플링) │
+│   └─제안 N개  └─제안 N개    └─제안 N개                 │
+└──────────────────────────────────────────────────────┘
+                    │ (모든 후보 제안)
+                    ▼
+┌─────────────── 2층: 심사단(Judges) ─────────────────┐
+│ 규칙기반 점수(구조/일관성)  +  LLM 쌍대비교(품질평가)    │
+│  ↳ 바이어스 완화: 순서랜덤/길이정규화/근거필수         │
+└──────────────────────────────────────────────────────┘
+                    │ (랭킹/점수, 신뢰도)
+                    ▼
+┌─────────────── 3층: 합의/합성(Synthesizer) ──────────┐
+│  다수결·보르다·가중투표(신뢰가중) → 최종 답안 + 근거    │
+└──────────────────────────────────────────────────────┘
+```
+
+### 핵심 구성 요소
+
+#### 1. **Proposer Layer (제안자 층)**
+- **GPT-4 Proposer**: 체계적 분석과 논리적 추론에 강점
+- **Claude Proposer**: 윤리적 고려사항과 균형잡힌 판단에 중점  
+- **Gemini Proposer**: 다각도 분석과 패턴 인식에 특화
+- **다양성 주입**: 각기 다른 temperature, 프롬프트 관점, 샘플링 방식 적용
+
+#### 2. **Judge Layer (심사 층)**
+- **Rule-Based Judge**: 구조적 품질 평가
+  - 완전성(제안의 충실도)
+  - 일관성(논리적 모순 검출)
+  - 증거 품질(근거의 신뢰성)
+  - 명확성(표현의 정확성)
+- **LLM Judge**: 지능적 품질 평가  
+  - 쌍대 비교를 통한 상대적 우수성 판단
+  - 바이어스 완화 기법 적용 (순서 무작위화, 길이 정규화)
+  - 다중 라운드 심사로 일관성 확보
+
+#### 3. **Synthesizer Layer (합의 층)**
+- **합의 방법론**:
+  - `majority`: 단순 다수결
+  - `borda`: 순위 기반 점수 집계
+  - `weighted_voting`: 에이전트별 성능 가중치 적용  
+  - `approval`: 임계값 기반 승인 투표
+- **증거 통합**: 승리 제안들의 증거를 관련성/신뢰성 기준으로 병합
+- **불확실성 추적**: 잔여 불확실성과 품질 플래그 생성
+
+### 사용 방법
+
+#### 환경 설정
+
+```bash
+# 위원회 시스템 활성화
+USE_COMMITTEE=true
+
+# 에이전트 설정
+COMMITTEE_CONSENSUS_METHOD=weighted_voting
+COMMITTEE_MIN_AGENTS=3
+COMMITTEE_MAX_PROPOSALS_PER_AGENT=2
+
+# AI 서비스 설정 (실제 API 키 필요)
+OPENAI_API_KEY=your_actual_openai_key
+CLAUDE_API_KEY=your_claude_key  
+GOOGLE_AI_API_KEY=your_gemini_key
+
+# 테스트용 (Mock 응답 사용)
+OPENAI_FALLBACK_TO_MOCK=true
+CLAUDE_API_KEY=mock
+GOOGLE_AI_API_KEY=mock
+```
+
+#### API 사용 예시
+
+```bash
+# 위원회 모드로 결정 요청
+POST /api/oracle/contracts/contract_123/decide-winner
+Authorization: Bearer <access_token>
+Content-Type: application/json
+
+{
+  "forceCommitteeMode": true,
+  "committeeConfig": {
+    "minProposals": 3,
+    "maxProposalsPerAgent": 2,
+    "consensusThreshold": 0.8,
+    "enableEarlyExit": true
+  }
+}
+```
+
+#### 응답 예시
+
+```json
+{
+  "success": true,
+  "winnerId": "partyA",
+  "decisionId": "decision_1692819234567_abc123",
+  "deliberationMode": "committee",
+  "transactionHash": "0x...",
+  "committeeMetrics": {
+    "totalProposals": 6,
+    "deliberationTimeMs": 8450,
+    "consensusLevel": 0.83,
+    "costBreakdown": {
+      "proposerTokens": 3420,
+      "judgeTokens": 1890,
+      "synthesizerTokens": 760,
+      "totalCostUSD": 0.12
+    }
+  },
+  "committeeDecisionId": "committee_contract_123_1692819234567"
+}
+```
+
+### 주요 특징
+
+#### ✅ **바이어스 완화**
+- 순서 무작위화로 위치 편향 제거
+- 길이 정규화로 장황함 편향 완화  
+- 에이전트 이름 마스킹으로 브랜드 편향 방지
+- 다중 라운드 심사로 일관성 검증
+
+#### 📊 **투명한 의사결정**
+- 각 에이전트의 제안과 근거 추적
+- 심사 과정의 상세 로깅
+- 합의 과정의 메트릭 제공
+- 대안 선택지와 확률 명시
+
+#### 🔧 **유연한 설정**
+- 합의 방법론 선택 가능
+- 에이전트별 활성화/비활성화
+- 성능 기반 가중치 자동 조정
+- Early exit으로 효율성 최적화
+
+#### 🛡️ **품질 보장**  
+- 규칙 기반 + LLM 기반 이중 검증
+- 신뢰도 추적 및 불확실성 계산
+- 인간 검토 권장 플래그
+- 소수 의견 및 충돌 증거 감지
+
+### 성능 및 비용
+
+- **평균 응답 시간**: 5-15초 (에이전트 수와 제안 수에 따라)
+- **토큰 사용량**: 단일 AI 대비 3-5배 (더 높은 품질 대가)
+- **비용 효율성**: 중요한 결정에서 오류 비용 고려시 ROI 양수
+- **확장성**: 에이전트 추가/제거로 유연한 확장
+
+### 단일 AI vs 위원회 모드 비교
+
+| 구분 | 단일 AI 모드 | 위원회 모드 |
+|------|-------------|-------------|
+| 응답 시간 | 1-3초 | 5-15초 |
+| 토큰 비용 | 기준 | 3-5배 |
+| 결정 품질 | 보통 | 높음 |
+| 신뢰도 | 중간 | 높음 |
+| 투명성 | 낮음 | 높음 |
+| 편향 위험 | 높음 | 낮음 |
+| 추천 용도 | 일반적 결정 | 중요한 결정 |
 
 ## 라이선스
 

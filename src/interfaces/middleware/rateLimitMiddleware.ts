@@ -33,17 +33,20 @@ export const createRateLimiter = (
   });
 };
 
+// Check if we're in development mode
+const isDevelopment = process.env.NODE_ENV === 'development';
+
 export const apiRateLimiter = createRateLimiter(
   15 * 60 * 1000, // 15 minutes
-  100 // 100 requests per window
+  isDevelopment ? 1000 : 100 // More lenient in development
 );
 
 export const authRateLimiter = createRateLimiter(
-  15 * 60 * 1000, // 15 minutes
-  5 // 5 login attempts per window
+  isDevelopment ? 60 * 1000 : 15 * 60 * 1000, // 1 minute in dev, 15 minutes in prod
+  isDevelopment ? 100 : 5 // 100 attempts per minute in dev, 5 per 15 min in prod
 );
 
 export const oracleRateLimiter = createRateLimiter(
   60 * 1000, // 1 minute
-  10 // 10 oracle requests per minute
+  isDevelopment ? 100 : 10 // More lenient in development
 );
