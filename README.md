@@ -16,7 +16,7 @@
 - 스마트 컨트랙트의 베팅 종료 시점 모니터링
 - **위원회 기반 AI 결정 시스템**: MoA(Mixture-of-Agents) + LLM-as-Judge 아키텍처
   - 다중 AI 에이전트의 협의 및 토론을 통한 승자 결정
-  - GPT-4, Claude, Gemini 등 다양한 AI 모델 활용
+  - GPT-5, Claude, Gemini 등 다양한 AI 모델 활용
   - 규칙 기반 + LLM 기반 심사 시스템
   - 가중 투표, 보르다 카운트, 다수결 등 다양한 합의 메커니즘
 - 블록체인에 승자 정보 제출 (상세한 위원회 결정 증명 포함)
@@ -41,7 +41,7 @@ src/
 │   ├── committee/   # 위원회 시스템
 │   │   ├── CommitteeOrchestrator.ts      # 전체 오케스트레이션
 │   │   ├── proposers/                    # AI 에이전트들
-│   │   │   ├── GPT4Proposer.ts
+│   │   │   ├── GPT5Proposer.ts
 │   │   │   ├── ClaudeProposer.ts
 │   │   │   └── GeminiProposer.ts
 │   │   ├── judges/                       # 심사 시스템
@@ -57,12 +57,6 @@ src/
     ├── controllers/  # HTTP 컨트롤러
     └── routes/      # Express 라우트
 ```
-
-### 주요 설계 원칙
-
-- **의존성 역전 원칙(DIP)**: 도메인 레이어가 인프라 레이어에 의존하지 않음
-- **느슨한 결합**: 인터페이스를 통한 모듈 간 통신
-- **관심사 분리**: 각 레이어가 명확한 책임을 가짐
 
 ## 설치 및 실행
 
