@@ -1,25 +1,18 @@
 import { Choice } from '../entities/Choice';
-import { BettingStats, ContractEventData, BetRevealedEvent } from '../entities/BettingStats';
+import { BettingStats, ContractEventData, BetPlacedEvent, BetRevealedEvent } from '../entities/BettingStats';
 
+// Matches the actual smart contract return values
 export interface ContractData {
-  id: string;
+  contractId: string;
   creator: string;
-  topic: string;
-  description: string;
-  partyAInfo: {
-    id: string;
-    name: string;
-    description: string;
-  };
-  partyBInfo: {
-    id: string;
-    name: string;
-    description: string;
-  };
+  partyA: string;  // Simple string from contract
+  partyB: string;  // Simple string from contract
   bettingEndTime: number;
-  winnerRewardPercentage: number;
-  status: number;
-  winnerId?: string;
+  status: number;  // ContractStatus enum value
+  winner: number;  // Choice enum value
+  totalPoolA: string;  // BigInt as string
+  totalPoolB: string;  // BigInt as string
+  partyRewardPercentage: number;
 }
 
 export interface IBlockchainService {
@@ -28,22 +21,21 @@ export interface IBlockchainService {
     winner: Choice
   ): Promise<string>;
 
-  getContract(contractAddress: string): Promise<ContractData>;
+  getContract(contractId: string): Promise<ContractData>;
   
-  getContractStats(contractAddress: string): Promise<BettingStats>;
-  
-  getContractState(contractAddress: string): Promise<{
-    partyAId: string;
-    partyBId: string;
-    bettingEndTime: number;
-    status: number;
-  }>;
+  // getContractStats removed - not in smart contract
   
   listenToContractCreated(
     callback: (event: ContractEventData) => void
   ): void;
 
-  listenToBetRevealed(
+  listenToBetPlaced(
+    contractAddress: string,
+    callback: (event: BetPlacedEvent) => void
+  ): void;
+  
+  // Keep old name for backward compatibility
+  listenToBetRevealed?(
     contractAddress: string,
     callback: (event: BetRevealedEvent) => void
   ): void;

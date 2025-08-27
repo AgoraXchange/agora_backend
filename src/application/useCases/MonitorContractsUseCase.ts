@@ -4,7 +4,7 @@ import { IBlockchainService } from '../../domain/services/IBlockchainService';
 import { DecideWinnerUseCase } from './DecideWinnerUseCase';
 import { Contract, ContractStatus } from '../../domain/entities/Contract';
 import { Party } from '../../domain/entities/Party';
-import { ContractEventData, BetRevealedEvent } from '../../domain/entities/BettingStats';
+import { ContractEventData, BetPlacedEvent } from '../../domain/entities/BettingStats';
 import { logger } from '../../infrastructure/logging/Logger';
 
 @injectable()
@@ -64,22 +64,23 @@ export class MonitorContractsUseCase {
     try {
       logger.info('Processing ContractCreated event', { 
         contractId: event.contractId,
-        topic: event.topic 
+        partyA: event.partyA,
+        partyB: event.partyB
       });
 
-      // Create Party entities
+      // Create Party entities with simplified data
       const partyA = new Party(
-        event.partyAInfo.id,
+        `party_a_${event.contractId}`,
         '', // address will be retrieved from blockchain if needed
-        event.partyAInfo.name,
-        event.partyAInfo.description
+        event.partyA,  // Simple string name from contract
+        event.partyA   // Using name as description for now
       );
 
       const partyB = new Party(
-        event.partyBInfo.id,
-        '', // address will be retrieved from blockchain if needed
-        event.partyBInfo.name,
-        event.partyBInfo.description
+        `party_b_${event.contractId}`,
+        '', // address will be retrieved from blockchain if needed  
+        event.partyB,  // Simple string name from contract
+        event.partyB   // Using name as description for now
       );
 
       // Create Contract entity
@@ -89,12 +90,12 @@ export class MonitorContractsUseCase {
         partyA,
         partyB,
         new Date(event.bettingEndTime * 1000), // Convert Unix timestamp to Date
-        100, // Default winner reward percentage, should be retrieved from blockchain
+        10, // Default winner reward percentage - should be retrieved from getContract()
         ContractStatus.CREATED,
         undefined, // no winner yet
         event.creator,
-        event.topic,
-        event.description
+        undefined, // topic not in smart contract event
+        undefined  // description not in smart contract event
       );
 
       // Save contract to repository
@@ -103,14 +104,15 @@ export class MonitorContractsUseCase {
       logger.info('Contract saved from blockchain event', { 
         contractId: event.contractId,
         creator: event.creator,
-        topic: event.topic
+        partyA: event.partyA,
+        partyB: event.partyB
       });
 
-      // Start listening for bet revealed events for this contract
-      this.blockchainService.listenToBetRevealed(
+      // Start listening for bet placed events for this contract
+      this.blockchainService.listenToBetPlaced(
         event.transactionHash, // Using transaction hash as contract address
-        (betEvent: BetRevealedEvent) => {
-          this.handleBetRevealed(betEvent);
+        (betEvent: BetPlacedEvent) => {
+          this.handleBetPlaced(betEvent);
         }
       );
 
@@ -122,8 +124,8 @@ export class MonitorContractsUseCase {
     }
   }
 
-  private handleBetRevealed(event: BetRevealedEvent): void {
-    logger.info('Bet revealed event received', {
+  private handleBetPlaced(event: BetPlacedEvent): void {
+    logger.info('Bet placed event received', {
       contractId: event.contractId,
       bettor: event.bettor,
       choice: event.choice,
