@@ -12,24 +12,14 @@ export interface BettingStats {
 export interface ContractEventData {
   contractId: string;
   creator: string;
-  topic: string;
-  description: string;
-  partyAInfo: {
-    id: string;
-    name: string;
-    description: string;
-  };
-  partyBInfo: {
-    id: string;
-    name: string;
-    description: string;
-  };
+  partyA: string;  // Simplified to just string
+  partyB: string;  // Simplified to just string
   bettingEndTime: number; // Unix timestamp
   blockNumber: number;
   transactionHash: string;
 }
 
-export interface BetRevealedEvent {
+export interface BetPlacedEvent {
   contractId: string;
   bettor: string;
   choice: number; // 1=A, 2=B
@@ -37,3 +27,6 @@ export interface BetRevealedEvent {
   blockNumber: number;
   transactionHash: string;
 }
+
+// Keep the old name as alias for backward compatibility during transition
+export type BetRevealedEvent = BetPlacedEvent;

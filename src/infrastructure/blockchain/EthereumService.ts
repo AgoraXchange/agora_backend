@@ -2,7 +2,7 @@ import { injectable, inject } from 'inversify';
 import { ethers } from 'ethers';
 import { IBlockchainService, ContractData } from '../../domain/services/IBlockchainService';
 import { Choice } from '../../domain/entities/Choice';
-import { BettingStats, ContractEventData, BetRevealedEvent } from '../../domain/entities/BettingStats';
+import { BettingStats, ContractEventData, BetPlacedEvent, BetRevealedEvent } from '../../domain/entities/BettingStats';
 import { CryptoService } from '../auth/CryptoService';
 import { logger } from '../logging/Logger';
 
@@ -40,12 +40,15 @@ export class EthereumService implements IBlockchainService {
     
     this.contractABI = [
       "function declareWinner(uint256 _contractId, uint8 _winner) external",
-      "function getContract(address contractAddress) external view returns (string id, address creator, string topic, string description, string partyAId, string partyAName, string partyADescription, string partyBId, string partyBName, string partyBDescription, uint256 bettingEndTime, uint256 winnerRewardPercentage, uint8 status, uint8 winnerId)",
-      "function getContractStats(address contractAddress) external view returns (uint256 totalBets, uint256 totalAmount, uint256 uniqueParticipants, uint256 partyABets, uint256 partyBBets, uint256 partyAAmount, uint256 partyBAmount, uint256 averageBetAmount)",
-      "function getContractState() external view returns (string partyAId, string partyBId, uint256 bettingEndTime, uint8 status)",
-      "event ContractCreated(uint256 indexed contractId, address indexed creator, string topic, string description, string partyAId, string partyAName, string partyADescription, string partyBId, string partyBName, string partyBDescription, uint256 bettingEndTime)",
-      "event BetRevealed(uint256 indexed contractId, address indexed bettor, uint8 choice, uint256 amount)",
-      "event WinnerDeclared(uint256 indexed contractId, uint8 winner)"
+      "function getContract(uint256 _contractId) external view returns (address creator, string memory partyA, string memory partyB, uint256 bettingEndTime, uint8 status, uint8 winner, uint256 totalPoolA, uint256 totalPoolB, uint256 partyRewardPercentage)",
+      "function closeBetting(uint256 _contractId) external",
+      "function placeBet(uint256 _contractId, uint8 _choice) external payable",
+      "function getUserBets(uint256 _contractId, address _user) external view returns (uint256[] memory amounts, uint8[] memory choices, bool[] memory claimed)",
+      "event ContractCreated(uint256 indexed contractId, address indexed creator, string partyA, string partyB, uint256 bettingEndTime)",
+      "event BetPlaced(uint256 indexed contractId, address indexed bettor, uint8 choice, uint256 amount)",
+      "event WinnerDeclared(uint256 indexed contractId, uint8 winner)",
+      "event RewardsDistributed(uint256 indexed contractId, uint256 partyReward, uint256 totalDistributed)",
+      "event RewardClaimed(uint256 indexed contractId, address indexed bettor, uint256 amount)"
     ];
   }
 
@@ -90,90 +93,43 @@ export class EthereumService implements IBlockchainService {
     }
   }
 
-  async getContract(contractAddress: string): Promise<ContractData> {
+  async getContract(contractId: string): Promise<ContractData> {
     try {
-      const contract = new ethers.Contract(contractAddress, this.contractABI, this.provider);
-      const contractData = await contract.getContract(contractAddress);
+      // Note: We need to get the main contract address to call getContract
+      const mainContractAddress = process.env.MAIN_CONTRACT_ADDRESS;
+      if (!mainContractAddress) {
+        throw new Error('Main contract address not configured');
+      }
       
+      const contract = new ethers.Contract(mainContractAddress, this.contractABI, this.provider);
+      // Call getContract with contractId (uint256), not contract address
+      const result = await contract.getContract(contractId);
+      
+      // Parse the returned tuple in the correct order
+      // Returns: (creator, partyA, partyB, bettingEndTime, status, winner, totalPoolA, totalPoolB, partyRewardPercentage)
       return {
-        id: contractData.id,
-        creator: contractData.creator,
-        topic: contractData.topic,
-        description: contractData.description,
-        partyAInfo: {
-          id: contractData.partyAId,
-          name: contractData.partyAName,
-          description: contractData.partyADescription
-        },
-        partyBInfo: {
-          id: contractData.partyBId,
-          name: contractData.partyBName,
-          description: contractData.partyBDescription
-        },
-        bettingEndTime: Number(contractData.bettingEndTime),
-        winnerRewardPercentage: Number(contractData.winnerRewardPercentage),
-        status: Number(contractData.status),
-        winnerId: contractData.winnerId ? contractData.winnerId.toString() : undefined
+        contractId: contractId,
+        creator: result[0],  // address
+        partyA: result[1],   // string
+        partyB: result[2],   // string
+        bettingEndTime: Number(result[3]),  // uint256
+        status: Number(result[4]),  // ContractStatus enum
+        winner: Number(result[5]),  // Choice enum
+        totalPoolA: result[6].toString(),  // uint256 as string
+        totalPoolB: result[7].toString(),  // uint256 as string
+        partyRewardPercentage: Number(result[8])  // uint256
       };
     } catch (error) {
-      logger.error('Failed to get contract data', { error: error.message, contractAddress });
+      logger.error('Failed to get contract data', { 
+        error: error instanceof Error ? error.message : 'Unknown error', 
+        contractId 
+      });
       throw new Error('Failed to get contract data from blockchain');
     }
   }
 
-  async getContractStats(contractAddress: string): Promise<BettingStats> {
-    try {
-      const contract = new ethers.Contract(contractAddress, this.contractABI, this.provider);
-      const stats = await contract.getContractStats(contractAddress);
-      
-      return {
-        totalBets: Number(stats.totalBets),
-        totalAmount: stats.totalAmount.toString(),
-        uniqueParticipants: Number(stats.uniqueParticipants),
-        partyABets: Number(stats.partyABets),
-        partyBBets: Number(stats.partyBBets),
-        partyAAmount: stats.partyAAmount.toString(),
-        partyBAmount: stats.partyBAmount.toString(),
-        averageBetAmount: stats.averageBetAmount.toString()
-      };
-    } catch (error) {
-      logger.error('Failed to get contract stats', { error: error.message, contractAddress });
-      throw new Error('Failed to get contract stats from blockchain');
-    }
-  }
-
-  async getContractState(contractAddress: string): Promise<{
-    partyAId: string;
-    partyBId: string;
-    bettingEndTime: number;
-    status: number;
-  }> {
-    if (this.mockMode) {
-      logger.info('🎭 MOCK: Returning simulated contract state', { contractAddress });
-      // Return mock contract state for testing
-      return {
-        partyAId: 'Lakers',
-        partyBId: 'Celtics',
-        bettingEndTime: Math.floor(Date.now() / 1000) + 3600, // 1 hour from now
-        status: 1 // Active
-      };
-    }
-
-    try {
-      const contract = new ethers.Contract(contractAddress, this.contractABI, this.provider);
-      const state = await contract.getContractState();
-      
-      return {
-        partyAId: state.partyAId,
-        partyBId: state.partyBId,
-        bettingEndTime: Number(state.bettingEndTime),
-        status: Number(state.status)
-      };
-    } catch (error) {
-      logger.error('Blockchain read error', { error: error.message, contractAddress });
-      throw new Error('Failed to get contract state from blockchain');
-    }
-  }
+  // getContractStats removed - not available in smart contract
+  // Use getContract() and extract totalPoolA/totalPoolB for betting statistics
 
   listenToContractCreated(
     callback: (event: ContractEventData) => void
@@ -192,22 +148,12 @@ export class EthereumService implements IBlockchainService {
       this.removeEventListener(contractAddress, 'ContractCreated');
     }
     
-    contract.on('ContractCreated', (contractId, creator, topic, description, partyAId, partyAName, partyADescription, partyBId, partyBName, partyBDescription, bettingEndTime, event) => {
+    contract.on('ContractCreated', (contractId, creator, partyA, partyB, bettingEndTime, event) => {
       const eventData: ContractEventData = {
         contractId: contractId.toString(),
         creator,
-        topic,
-        description,
-        partyAInfo: {
-          id: partyAId,
-          name: partyAName,
-          description: partyADescription
-        },
-        partyBInfo: {
-          id: partyBId,
-          name: partyBName,
-          description: partyBDescription
-        },
+        partyA,  // Simple string
+        partyB,  // Simple string
         bettingEndTime: Number(bettingEndTime),
         blockNumber: event.blockNumber,
         transactionHash: event.transactionHash
@@ -221,20 +167,20 @@ export class EthereumService implements IBlockchainService {
     logger.info('ContractCreated event listener registered', { contractAddress });
   }
 
-  listenToBetRevealed(
+  listenToBetPlaced(
     contractAddress: string,
-    callback: (event: BetRevealedEvent) => void
+    callback: (event: BetPlacedEvent) => void
   ): void {
     const contract = new ethers.Contract(contractAddress, this.contractABI, this.provider);
-    const key = `${contractAddress}-BetRevealed`;
+    const key = `${contractAddress}-BetPlaced`;
     
     if (this.eventListeners.has(key)) {
-      logger.warn('BetRevealed event listener already exists, removing old listener', { contractAddress });
-      this.removeEventListener(contractAddress, 'BetRevealed');
+      logger.warn('BetPlaced event listener already exists, removing old listener', { contractAddress });
+      this.removeEventListener(contractAddress, 'BetPlaced');
     }
     
-    contract.on('BetRevealed', (contractId, bettor, choice, amount, event) => {
-      const eventData: BetRevealedEvent = {
+    contract.on('BetPlaced', (contractId, bettor, choice, amount, event) => {
+      const eventData: BetPlacedEvent = {
         contractId: contractId.toString(),
         bettor,
         choice: Number(choice),
@@ -243,7 +189,7 @@ export class EthereumService implements IBlockchainService {
         transactionHash: event.transactionHash
       };
       
-      logger.info('BetRevealed event received', { 
+      logger.info('BetPlaced event received', { 
         contractId: eventData.contractId, 
         bettor: eventData.bettor,
         choice: eventData.choice 
@@ -252,7 +198,16 @@ export class EthereumService implements IBlockchainService {
     });
     
     this.eventListeners.set(key, contract);
-    logger.info('BetRevealed event listener registered', { contractAddress });
+    logger.info('BetPlaced event listener registered', { contractAddress });
+  }
+  
+  // Keep old method for backward compatibility
+  listenToBetRevealed(
+    contractAddress: string,
+    callback: (event: BetRevealedEvent) => void  
+  ): void {
+    // Redirect to new method name
+    this.listenToBetPlaced(contractAddress, callback);
   }
 
   listenToContractEvents(
