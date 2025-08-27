@@ -176,85 +176,49 @@ export class LLMJudge {
     const agentNameA = this.config.biasReductionTechniques.maskAgentNames ? 'Agent Alpha' : proposalA.agentName;
     const agentNameB = this.config.biasReductionTechniques.maskAgentNames ? 'Agent Beta' : proposalB.agentName;
 
-    // Optimize rationales to reduce tokens
-    const rationalA = proposalA.rationale.substring(0, 150);
-    const rationalB = proposalB.rationale.substring(0, 150);
-    const evidenceA = proposalA.evidence.slice(0, 2).join('; ');
-    const evidenceB = proposalB.evidence.slice(0, 2).join('; ');
+    // Aggressively optimize to reduce tokens for GPT-5 reasoning
+    const rationalA = proposalA.rationale.substring(0, 100);
+    const rationalB = proposalB.rationale.substring(0, 100);
+    const evidenceA = proposalA.evidence[0] || '';
+    const evidenceB = proposalB.evidence[0] || '';
     
-    return `Judge two proposals. Focus on logic and evidence quality.
+    return `Compare proposals:
 
-A (${agentNameA}):
-Winner: ${proposalA.winnerId} (${proposalA.confidence})
-Reason: ${rationalA}
-Evidence: ${evidenceA}
+A: ${proposalA.winnerId}/${proposalA.confidence.toFixed(2)} - ${rationalA}
+Ev: ${evidenceA}
 
-B (${agentNameB}):
-Winner: ${proposalB.winnerId} (${proposalB.confidence})
-Reason: ${rationalB}
-Evidence: ${evidenceB}
+B: ${proposalB.winnerId}/${proposalB.confidence.toFixed(2)} - ${rationalB}
+Ev: ${evidenceB}
 
-Return JSON:
-{
-  "winner": "A"|"B"|"tie",
-  "confidence": 0.0-1.0,
-  "overall_scores": {"A": 0-1, "B": 0-1},
-  "criteria_scores": {
-    "accuracy": {"A": 0-1, "B": 0-1},
-    "reasoning": {"A": 0-1, "B": 0-1},
-    "evidence": {"A": 0-1, "B": 0-1},
-    "clarity": {"A": 0-1, "B": 0-1}
-  },
-  "reasoning": ["key point"],
-  "key_differences": "main difference"
-}`;
+JSON output:
+{"winner":"A"|"B"|"tie","confidence":0-1,"overall_scores":{"A":0-1,"B":0-1},"criteria_scores":{"accuracy":{"A":0-1,"B":0-1},"reasoning":{"A":0-1,"B":0-1},"evidence":{"A":0-1,"B":0-1},"clarity":{"A":0-1,"B":0-1}},"reasoning":["reason"],"key_differences":"diff"}`;
   }
 
   private parseJudgmentResponse(aiResponse: any): PairwiseJudgment {
     try {
-      // Extract the structured judgment data from the AI response
-      // The response should be in the metadata.dataPoints based on how OpenAIService structures it
+      // The OpenAIService returns the parsed JSON directly in metadata.dataPoints
+      // when using a custom prompt through context
       const judgmentData = aiResponse.metadata?.dataPoints || {};
       
-      // Try to parse as structured judgment if available
-      let winner: 'A' | 'B' | 'tie' = 'tie';
-      let confidence = 0.5;
-      let overallScores = { A: 0.5, B: 0.5 };
-      let criteriaScores = {
+      // Extract judgment details with proper defaults
+      const winner = (judgmentData.winner as 'A' | 'B' | 'tie') || 'tie';
+      const confidence = typeof judgmentData.confidence === 'number' ? judgmentData.confidence : 0.5;
+      
+      const overallScores = judgmentData.overall_scores || { A: 0.5, B: 0.5 };
+      const criteriaScores = judgmentData.criteria_scores || {
         accuracy: { A: 0.5, B: 0.5 },
         reasoning: { A: 0.5, B: 0.5 },
         evidence: { A: 0.5, B: 0.5 },
         clarity: { A: 0.5, B: 0.5 }
       };
+      
       let reasoning: string[] = [];
-      
-      // Check if we got proper judgment structure
-      if (judgmentData.winner) {
-        winner = judgmentData.winner as 'A' | 'B' | 'tie';
-      } else if (aiResponse.winnerId === 'proposal_a') {
-        winner = 'A';
-      } else if (aiResponse.winnerId === 'proposal_b') {
-        winner = 'B';
-      }
-      
-      if (judgmentData.confidence !== undefined) {
-        confidence = judgmentData.confidence;
-      } else if (aiResponse.metadata?.confidence) {
-        confidence = aiResponse.metadata.confidence;
-      }
-      
-      if (judgmentData.overall_scores) {
-        overallScores = judgmentData.overall_scores;
-      }
-      
-      if (judgmentData.criteria_scores) {
-        criteriaScores = judgmentData.criteria_scores;
-      }
-      
-      if (judgmentData.reasoning && Array.isArray(judgmentData.reasoning)) {
+      if (Array.isArray(judgmentData.reasoning)) {
         reasoning = judgmentData.reasoning;
-      } else if (aiResponse.metadata?.reasoning) {
-        reasoning = [aiResponse.metadata.reasoning];
+      } else if (typeof judgmentData.reasoning === 'string') {
+        reasoning = [judgmentData.reasoning];
+      } else if (judgmentData.key_differences) {
+        reasoning = [judgmentData.key_differences];
       } else {
         reasoning = ['Analysis completed'];
       }
@@ -269,7 +233,8 @@ Return JSON:
 
     } catch (error) {
       logger.error('Failed to parse LLM judgment response', {
-        error: error instanceof Error ? error.message : 'Unknown error'
+        error: error instanceof Error ? error.message : 'Unknown error',
+        response: JSON.stringify(aiResponse).substring(0, 200)
       });
 
       // Return a conservative tie judgment
