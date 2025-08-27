@@ -1,0 +1,244 @@
+import { injectable } from 'inversify';
+import { JurorOpinion, JurorId } from '../../../domain/entities/JurorOpinion';
+import { JuryDiscussion } from '../../../domain/entities/JuryDiscussion';
+import { IJuror } from '../../../domain/services/IJuryService';
+import { logger } from '../../logging/Logger';
+
+@injectable()
+export class DiscussionManager {
+  
+  async facilitateDiscussion(
+    jurors: JurorOpinion[],
+    round: number,
+    jurorInstances: Map<JurorId, IJuror>,
+    previousDiscussions?: JuryDiscussion[]
+  ): Promise<JuryDiscussion[]> {
+    const discussions: JuryDiscussion[] = [];
+    
+    logger.info(`Facilitating discussion for round ${round}`, {
+      jurorCount: jurors.length,
+      previousDiscussions: previousDiscussions?.length || 0
+    });
+
+    try {
+      // 1. 발언 순서 결정 (신뢰도 낮은 순 - 불확실한 사람이 먼저 질문)
+      const speakingOrder = this.determineSpeakingOrder(jurors);
+      
+      // 2. 각 배심원 순차 발언
+      for (const speaker of speakingOrder) {
+        const speakerInstance = jurorInstances.get(speaker.jurorId);
+        if (!speakerInstance) continue;
+        
+        // 2.1 주요 입장 발표
+        const statement = this.createPositionStatement(speaker, round);
+        discussions.push(statement);
+        
+        // 2.2 다른 배심원들과 상호작용
+        for (const listener of jurors) {
+          if (listener.jurorId === speaker.jurorId) continue;
+          
+          const listenerInstance = jurorInstances.get(listener.jurorId);
+          if (!listenerInstance) continue;
+          
+          // 의견 차이가 있을 때 상호작용
+          if (this.shouldInteract(speaker, listener)) {
+            const interaction = await speakerInstance.respondToOpinion(listener, speaker);
+            discussions.push(interaction);
+            
+            // 리스너의 반응
+            if (interaction.argumentType === 'question') {
+              const answer = await listenerInstance.answerQuestion(interaction, listener);
+              discussions.push(answer);
+            } else if (interaction.argumentType === 'challenge') {
+              const response = await listenerInstance.respondToOpinion(speaker, listener);
+              discussions.push(response);
+            }
+          }
+        }
+      }
+      
+      // 3. 추가 설득 시도 (의견 불일치 시)
+      if (!this.isUnanimous(jurors) && round > 1) {
+        const persuasions = await this.generatePersuasionAttempts(
+          jurors, 
+          jurorInstances, 
+          discussions
+        );
+        discussions.push(...persuasions);
+      }
+      
+      // 4. 질문 라운드 (아직 결정하지 못한 배심원이 있을 때)
+      const undecidedJurors = jurors.filter(j => j.currentPosition === 'UNDECIDED');
+      if (undecidedJurors.length > 0) {
+        const questions = await this.generateQuestions(
+          undecidedJurors, 
+          jurors, 
+          jurorInstances
+        );
+        discussions.push(...questions);
+      }
+      
+      logger.info(`Discussion round ${round} completed`, {
+        totalStatements: discussions.length,
+        challenges: discussions.filter(d => d.argumentType === 'challenge').length,
+        questions: discussions.filter(d => d.argumentType === 'question').length
+      });
+      
+      return discussions;
+      
+    } catch (error) {
+      logger.error('Discussion facilitation failed', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        round
+      });
+      return discussions;
+    }
+  }
+  
+  private determineSpeakingOrder(jurors: JurorOpinion[]): JurorOpinion[] {
+    // 신뢰도가 낮은 순으로 정렬 (불확실한 사람이 먼저 발언)
+    return [...jurors].sort((a, b) => {
+      // UNDECIDED 우선
+      if (a.currentPosition === 'UNDECIDED' && b.currentPosition !== 'UNDECIDED') return -1;
+      if (b.currentPosition === 'UNDECIDED' && a.currentPosition !== 'UNDECIDED') return 1;
+      
+      // 그 다음 신뢰도 낮은 순
+      return a.confidenceLevel - b.confidenceLevel;
+    });
+  }
+  
+  private createPositionStatement(speaker: JurorOpinion, round: number): JuryDiscussion {
+    const statementText = speaker.toDiscussionStatement();
+    
+    return new JuryDiscussion(
+      `statement_${speaker.jurorId}_round${round}_${Date.now()}`,
+      speaker.jurorId,
+      speaker.jurorName,
+      statementText,
+      undefined, // 전체를 향한 발언
+      'support',
+      undefined,
+      speaker.confidenceLevel > 0.7 ? 'assertive' : 
+        speaker.currentPosition === 'UNDECIDED' ? 'questioning' : 'neutral',
+      speaker.confidenceLevel
+    );
+  }
+  
+  private shouldInteract(speaker: JurorOpinion, listener: JurorOpinion): boolean {
+    // 상호작용 조건
+    // 1. 의견이 다른 경우
+    if (speaker.currentPosition !== listener.currentPosition && 
+        speaker.currentPosition !== 'UNDECIDED' && 
+        listener.currentPosition !== 'UNDECIDED') {
+      return true;
+    }
+    
+    // 2. 한 쪽이 UNDECIDED인 경우
+    if (speaker.currentPosition === 'UNDECIDED' || listener.currentPosition === 'UNDECIDED') {
+      return true;
+    }
+    
+    // 3. 신뢰도 차이가 큰 경우 (같은 입장이어도)
+    if (Math.abs(speaker.confidenceLevel - listener.confidenceLevel) > 0.3) {
+      return true;
+    }
+    
+    return false;
+  }
+  
+  private isUnanimous(jurors: JurorOpinion[]): boolean {
+    const positions = jurors.map(j => j.currentPosition);
+    const firstPosition = positions[0];
+    return firstPosition !== 'UNDECIDED' && 
+           positions.every(p => p === firstPosition);
+  }
+  
+  private async generatePersuasionAttempts(
+    jurors: JurorOpinion[],
+    jurorInstances: Map<JurorId, IJuror>,
+    existingDiscussions: JuryDiscussion[]
+  ): Promise<JuryDiscussion[]> {
+    const persuasions: JuryDiscussion[] = [];
+    
+    // 가장 확신이 강한 배심원이 가장 약한 배심원 설득 시도
+    const sortedByConfidence = [...jurors].sort((a, b) => b.confidenceLevel - a.confidenceLevel);
+    const mostConfident = sortedByConfidence[0];
+    const leastConfident = sortedByConfidence[sortedByConfidence.length - 1];
+    
+    if (mostConfident.currentPosition !== leastConfident.currentPosition && 
+        mostConfident.currentPosition !== 'UNDECIDED' &&
+        leastConfident.willingToChange) {
+      
+      const persuaderInstance = jurorInstances.get(mostConfident.jurorId);
+      if (persuaderInstance) {
+        const persuasion = new JuryDiscussion(
+          `persuasion_${mostConfident.jurorId}_${Date.now()}`,
+          mostConfident.jurorId,
+          mostConfident.jurorName,
+          `${leastConfident.jurorName}님, 제 입장을 재고해 주시기 바랍니다. 
+          ${mostConfident.keyArguments[0]}는 명백한 증거입니다. 
+          ${mostConfident.currentPosition} 주장이 ${(mostConfident.confidenceLevel * 100).toFixed(0)}% 확실합니다.`,
+          leastConfident.jurorId,
+          'challenge',
+          undefined,
+          'assertive',
+          0.8 // 높은 설득 의도
+        );
+        
+        persuasions.push(persuasion);
+        
+        // 대상의 반응
+        const targetInstance = jurorInstances.get(leastConfident.jurorId);
+        if (targetInstance) {
+          const response = await targetInstance.considerPersuasion(persuasion, leastConfident);
+          persuasions.push(response.response);
+        }
+      }
+    }
+    
+    return persuasions;
+  }
+  
+  private async generateQuestions(
+    undecidedJurors: JurorOpinion[],
+    allJurors: JurorOpinion[],
+    jurorInstances: Map<JurorId, IJuror>
+  ): Promise<JuryDiscussion[]> {
+    const questions: JuryDiscussion[] = [];
+    
+    for (const undecided of undecidedJurors) {
+      const undecidedInstance = jurorInstances.get(undecided.jurorId);
+      if (!undecidedInstance) continue;
+      
+      // 가장 확신이 강한 배심원에게 질문
+      const mostConfident = allJurors
+        .filter(j => j.currentPosition !== 'UNDECIDED')
+        .sort((a, b) => b.confidenceLevel - a.confidenceLevel)[0];
+      
+      if (mostConfident) {
+        const question = new JuryDiscussion(
+          `question_${undecided.jurorId}_${Date.now()}`,
+          undecided.jurorId,
+          undecided.jurorName,
+          `${mostConfident.jurorName}님, ${mostConfident.currentPosition} 주장의 핵심 근거를 더 설명해 주시겠습니까?`,
+          mostConfident.jurorId,
+          'question',
+          undefined,
+          'questioning',
+          0.3
+        );
+        
+        questions.push(question);
+        
+        // 답변 생성
+        const answerInstance = jurorInstances.get(mostConfident.jurorId);
+        if (answerInstance) {
+          const answer = await answerInstance.answerQuestion(question, mostConfident);
+          questions.push(answer);
+        }
+      }
+    }
+    
+    return questions;
+  }
+}

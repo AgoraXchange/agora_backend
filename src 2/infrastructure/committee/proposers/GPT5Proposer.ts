@@ -21,31 +21,45 @@ export class GPT5Proposer extends BaseProposer {
   protected getDefaultConfig(): ProposerConfig {
     return {
       temperature: 0.7,
-      maxTokens: 2000,
+      maxTokens: 1000,
       topP: 0.9,
       frequencyPenalty: 0.0,
       presencePenalty: 0.0,
-      systemPrompt: `Expert analyst evaluating smart contract disputes. Analyze parties objectively and decide winner.
+      systemPrompt: `You are an expert analyst serving on a committee to determine the winner of a smart contract dispute between two parties.
 
-Return JSON:
+Your role is to:
+1. Carefully analyze both parties involved in the contract
+2. Consider all available evidence and context
+3. Make a reasoned decision about which party should be declared the winner
+4. Provide clear rationale with supporting evidence
+
+Be thorough, unbiased, and focus on factual analysis. Your decision will be combined with other expert analyses to reach a final consensus.
+
+IMPORTANT: You must respond in valid JSON format with this exact structure:
 {
   "winner": "partyA" or "partyB",
-  "confidence": 0.0-1.0,
-  "rationale": "brief reasoning (max 100 words)",
-  "evidence": ["key point 1", "key point 2"],
-  "methodology": "analysis method"
+  "confidence": 0.0 to 1.0,
+  "rationale": "detailed explanation of your reasoning",
+  "evidence": ["list", "of", "supporting", "evidence", "points"],
+  "methodology": "brief description of your analysis approach"
 }`,
-      userPromptTemplate: `Contract {CONTRACT_ID}
+      userPromptTemplate: `Please analyze the following smart contract dispute and determine the winner:
 
-Party A: {PARTY_A_NAME} ({PARTY_A_ADDRESS})
-{PARTY_A_DESCRIPTION}
+Contract ID: {CONTRACT_ID}
 
-Party B: {PARTY_B_NAME} ({PARTY_B_ADDRESS})
-{PARTY_B_DESCRIPTION}
+Party A:
+- Name: {PARTY_A_NAME}
+- Address: {PARTY_A_ADDRESS}  
+- Description: {PARTY_A_DESCRIPTION}
 
-Context: {CONTEXT}
+Party B:
+- Name: {PARTY_B_NAME}
+- Address: {PARTY_B_ADDRESS}
+- Description: {PARTY_B_DESCRIPTION}
 
-Determine winner. Return JSON.`
+Additional Context: {CONTEXT}
+
+Based on your analysis, which party should be declared the winner? Provide your response in the required JSON format.`
     };
   }
 
@@ -92,21 +106,9 @@ Determine winner. Return JSON.`
 
       const usage = completion.usage;
       const content = completion.choices[0]?.message?.content;
-      const finishReason = completion.choices[0]?.finish_reason;
 
       if (!content) {
-        logger.error('GPT-5 response missing content', {
-          finishReason,
-          usage: usage
-        });
-        throw new Error(`No content received from GPT-5 (finish_reason: ${finishReason})`);
-      }
-      
-      if (finishReason === 'length') {
-        logger.warn('GPT-5 response truncated due to token limit', {
-          contentLength: content.length,
-          usage: usage
-        });
+        throw new Error('No content received from GPT-5');
       }
 
       logger.debug('GPT-5 response received', {

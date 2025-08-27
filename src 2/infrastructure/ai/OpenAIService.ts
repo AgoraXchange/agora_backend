@@ -26,26 +26,6 @@ export class OpenAIService implements IAIService {
       const response = await this.callOpenAI(prompt);
       
       const analysis = this.parseResponse(response);
-      
-      // For judge comparisons, the response is already structured judgment data
-      if (input.context?.prompt) {
-        // This is a judge comparison, return the full judgment data
-        const winnerId = this.determineWinner(input, analysis);
-        
-        const metadata: DecisionMetadata = {
-          confidence: analysis.confidence || 0.85,
-          reasoning: analysis.reasoning || 'AI analysis completed',
-          dataPoints: analysis, // Pass the entire response as dataPoints for judge
-          timestamp: new Date()
-        };
-
-        return {
-          winnerId,
-          metadata
-        };
-      }
-      
-      // Regular analysis path
       const winnerId = this.determineWinner(input, analysis);
       
       const metadata: DecisionMetadata = {
@@ -74,12 +54,6 @@ export class OpenAIService implements IAIService {
   }
 
   private buildPrompt(input: AIAnalysisInput): string {
-    // Check if this is a judge comparison (has prompt in context)
-    if (input.context?.prompt) {
-      return input.context.prompt;
-    }
-    
-    // Default prompt for regular analysis
     return `
       Analyze the following contract parties and determine the winner:
       
@@ -138,73 +112,21 @@ export class OpenAIService implements IAIService {
           }
         ],
         temperature: 1, // GPT-5 only supports temperature 1
-        max_completion_tokens: 8000, // Increased significantly for GPT-5 reasoning tokens + response
+        max_completion_tokens: 500,
         response_format: { type: 'json_object' }
       });
 
       const responseText = completion.choices[0]?.message?.content;
-      const finishReason = completion.choices[0]?.finish_reason;
-      const usage = completion.usage;
-      
-      // Extract reasoning tokens if available (GPT-5 specific)
-      const reasoningTokens = (usage as any)?.completion_tokens_details?.reasoning_tokens || 0;
-      const actualCompletionTokens = usage?.completion_tokens || 0;
-      const effectiveOutputTokens = actualCompletionTokens - reasoningTokens;
       
       if (!responseText) {
-        logger.error('Empty response from OpenAI', {
-          finishReason,
-          usage,
-          reasoningTokens,
-          effectiveOutputTokens,
-          promptLength: prompt.length,
-          model: this.model
-        });
-        
-        // Special handling for GPT-5 reasoning token exhaustion
-        if (reasoningTokens >= 2000 && effectiveOutputTokens <= 0) {
-          throw new Error(`GPT-5 reasoning tokens (${reasoningTokens}) consumed entire budget, no output tokens available. Consider increasing max_completion_tokens or simplifying the prompt.`);
-        }
-        
-        throw new Error(`Empty response from OpenAI (finish_reason: ${finishReason}, reasoning_tokens: ${reasoningTokens}, total_tokens: ${usage?.total_tokens || 'unknown'})`);
+        throw new Error('Empty response from OpenAI');
       }
 
-      if (finishReason === 'length') {
-        logger.warn('OpenAI response truncated due to token limit', {
-          usage,
-          reasoningTokens,
-          effectiveOutputTokens,
-          contentLength: responseText.length
-        });
-        // Attempt to parse partial response
-        try {
-          return JSON.parse(responseText);
-        } catch (parseError) {
-          logger.error('Failed to parse truncated response', {
-            error: parseError instanceof Error ? parseError.message : 'Unknown error',
-            responsePreview: responseText.substring(0, 200),
-            reasoningTokens,
-            effectiveOutputTokens
-          });
-          throw new Error(`Response truncated and unparseable (reasoning_tokens: ${reasoningTokens}, effective_output: ${effectiveOutputTokens})`);
-        }
-      }
-
-      logger.info('Received response from OpenAI', {
-        finishReason,
-        tokensUsed: usage?.total_tokens,
-        reasoningTokens,
-        effectiveOutputTokens,
-        responseLength: responseText.length
-      });
+      logger.info('Received response from OpenAI');
       
       return JSON.parse(responseText);
     } catch (error) {
-      logger.error('OpenAI API call failed', { 
-        error: error instanceof Error ? error.message : 'Unknown error',
-        model: this.model,
-        promptLength: prompt.length
-      });
+      logger.error('OpenAI API call failed', { error: error.message });
       
       if (process.env.OPENAI_FALLBACK_TO_MOCK === 'true') {
         logger.warn('Falling back to mock response');

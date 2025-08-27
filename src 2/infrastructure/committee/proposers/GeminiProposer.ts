@@ -12,19 +12,56 @@ export class GeminiProposer extends BaseProposer {
   protected getDefaultConfig(): ProposerConfig {
     return {
       temperature: 0.8, // Gemini can handle higher temperature well
-      maxTokens: 4000, // Increased to prevent truncation
+      maxTokens: 1024,
       topP: 0.95,
-      systemPrompt: `Analyze contract dispute. Return concise JSON:
+      systemPrompt: `You are Gemini Pro, Google's advanced AI model, serving as a multi-modal analytical expert on a committee evaluating smart contract disputes.
+
+Your analytical strengths include:
+1. Multi-perspective reasoning and synthesis
+2. Pattern recognition across complex data
+3. Systematic evaluation of competing claims
+4. Integration of diverse information sources
+5. Probabilistic reasoning under uncertainty
+
+Approach this analysis with:
+- Comprehensive evaluation of both parties
+- Data-driven decision making
+- Clear probabilistic confidence assessment
+- Identification of key decision factors
+- Recognition of information gaps
+
+Output your analysis in this JSON structure:
 {
   "winner": "partyA" or "partyB",
-  "confidence": 0.0-1.0,
-  "rationale": "brief reason (max 80 words)",
-  "evidence": ["key point 1", "key point 2"]
+  "confidence": 0.0 to 1.0,
+  "rationale": "systematic analysis with clear reasoning chain",
+  "evidence": ["key", "evidence", "factors", "considered"],
+  "methodology": "multi-perspective analytical framework",
+  "decision_factors": ["primary", "factors", "influencing", "decision"],
+  "alternative_scenarios": "brief discussion of alternative outcomes",
+  "information_gaps": ["identified", "limitations", "or", "missing", "data"]
 }`,
-      userPromptTemplate: `Contract {CONTRACT_ID}
-A: {PARTY_A_NAME} - {PARTY_A_DESCRIPTION}
-B: {PARTY_B_NAME} - {PARTY_B_DESCRIPTION}
-Determine winner. Return JSON.`
+      userPromptTemplate: `Analyze this smart contract dispute using your multi-perspective analytical capabilities:
+
+CONTRACT ANALYSIS REQUEST
+Contract ID: {CONTRACT_ID}
+
+PARTY PROFILES:
+
+Party A Analysis:
+- Identity: {PARTY_A_NAME}
+- Blockchain Address: {PARTY_A_ADDRESS}
+- Profile: {PARTY_A_DESCRIPTION}
+
+Party B Analysis:
+- Identity: {PARTY_B_NAME}  
+- Blockchain Address: {PARTY_B_ADDRESS}
+- Profile: {PARTY_B_DESCRIPTION}
+
+CONTEXTUAL DATA:
+{CONTEXT}
+
+Please conduct a comprehensive multi-perspective analysis to determine which party should be declared the winner. Consider all angles, weigh probabilities, and provide your structured assessment.`
     };
   }
 
@@ -68,8 +105,8 @@ Determine winner. Return JSON.`
         generationConfig: {
           temperature: temperature,
           maxOutputTokens: this.config.maxTokens,
-          topP: this.config.topP
-          // Removed responseMimeType to avoid truncation issues
+          topP: this.config.topP,
+          responseMimeType: 'application/json'
         }
       });
 
@@ -77,14 +114,6 @@ Determine winner. Return JSON.`
       const response = result.response;
       let textContent = response.text();
       let responseContent: any;
-      
-      // Check for finish reason
-      const candidate = response.candidates?.[0];
-      const finishReason = candidate?.finishReason;
-      
-      if (finishReason === 'MAX_TOKENS') {
-        logger.warn('Gemini response truncated due to token limit');
-      }
       
       // Remove markdown code blocks if present
       if (textContent.includes('```json')) {
@@ -97,17 +126,19 @@ Determine winner. Return JSON.`
         // Try to parse as JSON
         responseContent = JSON.parse(textContent.trim());
       } catch (parseError) {
-        logger.warn('Failed to parse Gemini response as JSON', { 
-          error: parseError instanceof Error ? parseError.message : 'Unknown parse error',
-          responseLength: textContent.length,
-          finishReason
+        logger.warn('Failed to parse Gemini response as JSON, using text content', { 
+          error: parseError instanceof Error ? parseError.message : 'Unknown parse error' 
         });
-        // Create structured response from text (simplified)
+        // Create structured response from text
         responseContent = {
           winner: textContent.includes('partyA') ? 'partyA' : 'partyB',
           confidence: 0.75,
-          rationale: textContent.substring(0, 200),
-          evidence: ['Based on Gemini analysis']
+          rationale: textContent,
+          evidence: ['Based on Gemini analysis'],
+          methodology: 'multi-perspective analytical framework',
+          decision_factors: ['Analysis completed with Gemini'],
+          alternative_scenarios: 'Gemini analysis',
+          information_gaps: ['Response parsing uncertainty']
         };
       }
       
@@ -149,11 +180,28 @@ Determine winner. Return JSON.`
     const mockResponse = {
       winner: decision.winner,
       confidence: decision.confidence,
-      rationale: `Analysis shows ${decision.winner} has stronger position based on performance metrics and compliance patterns. Risk-adjusted evaluation indicates higher success probability.`,
+      rationale: `Multi-perspective analysis reveals ${decision.winner} has stronger positioning across key evaluation dimensions. My systematic framework evaluated contractual compliance, historical performance, risk factors, and procedural adherence. The analysis incorporated probabilistic reasoning to account for uncertainty while identifying the most likely successful outcome based on available data patterns.`,
       evidence: [
-        'Performance metrics favor this party',
-        'Risk assessment indicates lower exposure',
-        'Historical compliance patterns support decision'
+        'Contractual obligation fulfillment patterns',
+        'Historical performance metrics',
+        'Risk assessment indicators',
+        'Procedural compliance verification',
+        'Pattern analysis of similar cases',
+        'Multi-dimensional scoring results'
+      ],
+      methodology: 'multi-perspective analytical framework',
+      decision_factors: [
+        'Quantitative performance indicators',
+        'Qualitative assessment of execution capability',
+        'Risk-adjusted probability calculations',
+        'Comparative advantage analysis'
+      ],
+      alternative_scenarios: `Alternative outcome probability: ${(1 - decision.confidence).toFixed(2)} - would require additional evidence in specific areas to overturn primary conclusion`,
+      information_gaps: [
+        'Real-time performance data',
+        'Complete historical context',
+        'Detailed technical implementation metrics',
+        'Third-party verification sources'
       ]
     };
 
