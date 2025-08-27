@@ -12,56 +12,32 @@ export class GeminiProposer extends BaseProposer {
   protected getDefaultConfig(): ProposerConfig {
     return {
       temperature: 0.8, // Gemini can handle higher temperature well
-      maxTokens: 1024,
+      maxTokens: 2000,
       topP: 0.95,
-      systemPrompt: `You are Gemini Pro, Google's advanced AI model, serving as a multi-modal analytical expert on a committee evaluating smart contract disputes.
+      systemPrompt: `Gemini analyzing smart contract disputes with multi-perspective approach.
 
-Your analytical strengths include:
-1. Multi-perspective reasoning and synthesis
-2. Pattern recognition across complex data
-3. Systematic evaluation of competing claims
-4. Integration of diverse information sources
-5. Probabilistic reasoning under uncertainty
-
-Approach this analysis with:
-- Comprehensive evaluation of both parties
-- Data-driven decision making
-- Clear probabilistic confidence assessment
-- Identification of key decision factors
-- Recognition of information gaps
-
-Output your analysis in this JSON structure:
+Return JSON:
 {
   "winner": "partyA" or "partyB",
-  "confidence": 0.0 to 1.0,
-  "rationale": "systematic analysis with clear reasoning chain",
-  "evidence": ["key", "evidence", "factors", "considered"],
-  "methodology": "multi-perspective analytical framework",
-  "decision_factors": ["primary", "factors", "influencing", "decision"],
-  "alternative_scenarios": "brief discussion of alternative outcomes",
-  "information_gaps": ["identified", "limitations", "or", "missing", "data"]
+  "confidence": 0.0-1.0,
+  "rationale": "analysis summary (max 100 words)",
+  "evidence": ["factor 1", "factor 2"],
+  "methodology": "multi-perspective analysis",
+  "decision_factors": ["key factor"],
+  "alternative_scenarios": "brief alternative",
+  "information_gaps": ["gap 1"]
 }`,
-      userPromptTemplate: `Analyze this smart contract dispute using your multi-perspective analytical capabilities:
+      userPromptTemplate: `Contract {CONTRACT_ID}
 
-CONTRACT ANALYSIS REQUEST
-Contract ID: {CONTRACT_ID}
+Party A: {PARTY_A_NAME} ({PARTY_A_ADDRESS})
+{PARTY_A_DESCRIPTION}
 
-PARTY PROFILES:
+Party B: {PARTY_B_NAME} ({PARTY_B_ADDRESS})
+{PARTY_B_DESCRIPTION}
 
-Party A Analysis:
-- Identity: {PARTY_A_NAME}
-- Blockchain Address: {PARTY_A_ADDRESS}
-- Profile: {PARTY_A_DESCRIPTION}
+Context: {CONTEXT}
 
-Party B Analysis:
-- Identity: {PARTY_B_NAME}  
-- Blockchain Address: {PARTY_B_ADDRESS}
-- Profile: {PARTY_B_DESCRIPTION}
-
-CONTEXTUAL DATA:
-{CONTEXT}
-
-Please conduct a comprehensive multi-perspective analysis to determine which party should be declared the winner. Consider all angles, weigh probabilities, and provide your structured assessment.`
+Analyze systematically. Return JSON.`
     };
   }
 
@@ -105,8 +81,8 @@ Please conduct a comprehensive multi-perspective analysis to determine which par
         generationConfig: {
           temperature: temperature,
           maxOutputTokens: this.config.maxTokens,
-          topP: this.config.topP,
-          responseMimeType: 'application/json'
+          topP: this.config.topP
+          // Removed responseMimeType to avoid truncation issues
         }
       });
 
@@ -114,6 +90,14 @@ Please conduct a comprehensive multi-perspective analysis to determine which par
       const response = result.response;
       let textContent = response.text();
       let responseContent: any;
+      
+      // Check for finish reason
+      const candidate = response.candidates?.[0];
+      const finishReason = candidate?.finishReason;
+      
+      if (finishReason === 'MAX_TOKENS') {
+        logger.warn('Gemini response truncated due to token limit');
+      }
       
       // Remove markdown code blocks if present
       if (textContent.includes('```json')) {
@@ -126,8 +110,10 @@ Please conduct a comprehensive multi-perspective analysis to determine which par
         // Try to parse as JSON
         responseContent = JSON.parse(textContent.trim());
       } catch (parseError) {
-        logger.warn('Failed to parse Gemini response as JSON, using text content', { 
-          error: parseError instanceof Error ? parseError.message : 'Unknown parse error' 
+        logger.warn('Failed to parse Gemini response as JSON', { 
+          error: parseError instanceof Error ? parseError.message : 'Unknown parse error',
+          responseLength: textContent.length,
+          finishReason
         });
         // Create structured response from text
         responseContent = {

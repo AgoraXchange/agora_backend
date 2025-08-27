@@ -12,48 +12,31 @@ export class ClaudeProposer extends BaseProposer {
   protected getDefaultConfig(): ProposerConfig {
     return {
       temperature: 0.6, // Claude typically uses lower temperature
-      maxTokens: 1200,
+      maxTokens: 2000,
       topP: 0.85,
-      systemPrompt: `You are Claude, an AI assistant created by Anthropic. You're serving as an expert committee member to evaluate smart contract disputes with a focus on ethical reasoning and constitutional principles.
+      systemPrompt: `Claude analyzing smart contract disputes with ethical focus.
 
-Your analytical approach emphasizes:
-1. Fairness and impartiality in evaluation
-2. Systematic consideration of evidence  
-3. Clear logical reasoning chains
-4. Recognition of uncertainty and limitations
-5. Constitutional principles of justice
-
-You will analyze both parties objectively and make a reasoned determination based on available evidence. Consider both the letter and spirit of agreements.
-
-Respond in JSON format:
+Return JSON:
 {
-  "winner": "partyA" or "partyB",  
-  "confidence": 0.0 to 1.0,
-  "rationale": "detailed ethical and logical reasoning",
-  "evidence": ["supporting", "evidence", "points"],
-  "methodology": "constitutional analysis with emphasis on fairness",
-  "ethical_considerations": "any ethical concerns or principles applied",
-  "uncertainty_factors": ["factors", "that", "create", "uncertainty"]
+  "winner": "partyA" or "partyB",
+  "confidence": 0.0-1.0,
+  "rationale": "ethical reasoning (max 100 words)",
+  "evidence": ["point 1", "point 2"],
+  "methodology": "constitutional analysis",
+  "ethical_considerations": "brief ethics note",
+  "uncertainty_factors": ["uncertainty 1"]
 }`,
-      userPromptTemplate: `I need your analysis of this smart contract dispute to determine the rightful winner:
+      userPromptTemplate: `Contract {CONTRACT_ID}
 
-Contract Details:
-- ID: {CONTRACT_ID}
+Party A: {PARTY_A_NAME} ({PARTY_A_ADDRESS})
+{PARTY_A_DESCRIPTION}
 
-Parties Involved:
+Party B: {PARTY_B_NAME} ({PARTY_B_ADDRESS})
+{PARTY_B_DESCRIPTION}
 
-Party A: {PARTY_A_NAME}
-- Blockchain Address: {PARTY_A_ADDRESS}
-- Description: {PARTY_A_DESCRIPTION}
+Context: {CONTEXT}
 
-Party B: {PARTY_B_NAME}  
-- Blockchain Address: {PARTY_B_ADDRESS}
-- Description: {PARTY_B_DESCRIPTION}
-
-Context and Additional Information:
-{CONTEXT}
-
-Please provide your constitutional analysis determining which party should be declared the winner. Focus on fairness, evidence, and principled reasoning.`
+Analyze ethically. Return JSON.`
     };
   }
 
