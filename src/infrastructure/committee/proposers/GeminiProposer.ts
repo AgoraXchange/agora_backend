@@ -12,32 +12,19 @@ export class GeminiProposer extends BaseProposer {
   protected getDefaultConfig(): ProposerConfig {
     return {
       temperature: 0.8, // Gemini can handle higher temperature well
-      maxTokens: 2000,
+      maxTokens: 4000, // Increased to prevent truncation
       topP: 0.95,
-      systemPrompt: `Gemini analyzing smart contract disputes with multi-perspective approach.
-
-Return JSON:
+      systemPrompt: `Analyze contract dispute. Return concise JSON:
 {
   "winner": "partyA" or "partyB",
   "confidence": 0.0-1.0,
-  "rationale": "analysis summary (max 100 words)",
-  "evidence": ["factor 1", "factor 2"],
-  "methodology": "multi-perspective analysis",
-  "decision_factors": ["key factor"],
-  "alternative_scenarios": "brief alternative",
-  "information_gaps": ["gap 1"]
+  "rationale": "brief reason (max 80 words)",
+  "evidence": ["key point 1", "key point 2"]
 }`,
       userPromptTemplate: `Contract {CONTRACT_ID}
-
-Party A: {PARTY_A_NAME} ({PARTY_A_ADDRESS})
-{PARTY_A_DESCRIPTION}
-
-Party B: {PARTY_B_NAME} ({PARTY_B_ADDRESS})
-{PARTY_B_DESCRIPTION}
-
-Context: {CONTEXT}
-
-Analyze systematically. Return JSON.`
+A: {PARTY_A_NAME} - {PARTY_A_DESCRIPTION}
+B: {PARTY_B_NAME} - {PARTY_B_DESCRIPTION}
+Determine winner. Return JSON.`
     };
   }
 
@@ -115,16 +102,12 @@ Analyze systematically. Return JSON.`
           responseLength: textContent.length,
           finishReason
         });
-        // Create structured response from text
+        // Create structured response from text (simplified)
         responseContent = {
           winner: textContent.includes('partyA') ? 'partyA' : 'partyB',
           confidence: 0.75,
-          rationale: textContent,
-          evidence: ['Based on Gemini analysis'],
-          methodology: 'multi-perspective analytical framework',
-          decision_factors: ['Analysis completed with Gemini'],
-          alternative_scenarios: 'Gemini analysis',
-          information_gaps: ['Response parsing uncertainty']
+          rationale: textContent.substring(0, 200),
+          evidence: ['Based on Gemini analysis']
         };
       }
       
@@ -166,28 +149,11 @@ Analyze systematically. Return JSON.`
     const mockResponse = {
       winner: decision.winner,
       confidence: decision.confidence,
-      rationale: `Multi-perspective analysis reveals ${decision.winner} has stronger positioning across key evaluation dimensions. My systematic framework evaluated contractual compliance, historical performance, risk factors, and procedural adherence. The analysis incorporated probabilistic reasoning to account for uncertainty while identifying the most likely successful outcome based on available data patterns.`,
+      rationale: `Analysis shows ${decision.winner} has stronger position based on performance metrics and compliance patterns. Risk-adjusted evaluation indicates higher success probability.`,
       evidence: [
-        'Contractual obligation fulfillment patterns',
-        'Historical performance metrics',
-        'Risk assessment indicators',
-        'Procedural compliance verification',
-        'Pattern analysis of similar cases',
-        'Multi-dimensional scoring results'
-      ],
-      methodology: 'multi-perspective analytical framework',
-      decision_factors: [
-        'Quantitative performance indicators',
-        'Qualitative assessment of execution capability',
-        'Risk-adjusted probability calculations',
-        'Comparative advantage analysis'
-      ],
-      alternative_scenarios: `Alternative outcome probability: ${(1 - decision.confidence).toFixed(2)} - would require additional evidence in specific areas to overturn primary conclusion`,
-      information_gaps: [
-        'Real-time performance data',
-        'Complete historical context',
-        'Detailed technical implementation metrics',
-        'Third-party verification sources'
+        'Performance metrics favor this party',
+        'Risk assessment indicates lower exposure',
+        'Historical compliance patterns support decision'
       ]
     };
 
