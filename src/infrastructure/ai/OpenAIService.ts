@@ -54,6 +54,12 @@ export class OpenAIService implements IAIService {
   }
 
   private buildPrompt(input: AIAnalysisInput): string {
+    // Check if this is a judge comparison (has prompt in context)
+    if (input.context?.prompt) {
+      return input.context.prompt;
+    }
+    
+    // Default prompt for regular analysis
     return `
       Analyze the following contract parties and determine the winner:
       
@@ -112,21 +118,54 @@ export class OpenAIService implements IAIService {
           }
         ],
         temperature: 1, // GPT-5 only supports temperature 1
-        max_completion_tokens: 500,
+        max_completion_tokens: 2000, // Increased for GPT-5 reasoning tokens
         response_format: { type: 'json_object' }
       });
 
       const responseText = completion.choices[0]?.message?.content;
+      const finishReason = completion.choices[0]?.finish_reason;
+      const usage = completion.usage;
       
       if (!responseText) {
-        throw new Error('Empty response from OpenAI');
+        logger.error('Empty response from OpenAI', {
+          finishReason,
+          usage,
+          promptLength: prompt.length,
+          model: this.model
+        });
+        throw new Error(`Empty response from OpenAI (finish_reason: ${finishReason}, tokens used: ${usage?.total_tokens || 'unknown'})`);
       }
 
-      logger.info('Received response from OpenAI');
+      if (finishReason === 'length') {
+        logger.warn('OpenAI response truncated due to token limit', {
+          usage,
+          contentLength: responseText.length
+        });
+        // Attempt to parse partial response
+        try {
+          return JSON.parse(responseText);
+        } catch (parseError) {
+          logger.error('Failed to parse truncated response', {
+            error: parseError instanceof Error ? parseError.message : 'Unknown error',
+            responsePreview: responseText.substring(0, 200)
+          });
+          throw new Error('Response truncated and unparseable');
+        }
+      }
+
+      logger.info('Received response from OpenAI', {
+        finishReason,
+        tokensUsed: usage?.total_tokens,
+        responseLength: responseText.length
+      });
       
       return JSON.parse(responseText);
     } catch (error) {
-      logger.error('OpenAI API call failed', { error: error.message });
+      logger.error('OpenAI API call failed', { 
+        error: error instanceof Error ? error.message : 'Unknown error',
+        model: this.model,
+        promptLength: prompt.length
+      });
       
       if (process.env.OPENAI_FALLBACK_TO_MOCK === 'true') {
         logger.warn('Falling back to mock response');

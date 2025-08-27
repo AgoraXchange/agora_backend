@@ -176,79 +176,96 @@ export class LLMJudge {
     const agentNameA = this.config.biasReductionTechniques.maskAgentNames ? 'Agent Alpha' : proposalA.agentName;
     const agentNameB = this.config.biasReductionTechniques.maskAgentNames ? 'Agent Beta' : proposalB.agentName;
 
-    return `You are an expert judge evaluating two AI-generated analyses to determine which provides a better decision for a smart contract dispute. 
+    // Optimize rationales to reduce tokens
+    const rationalA = proposalA.rationale.substring(0, 150);
+    const rationalB = proposalB.rationale.substring(0, 150);
+    const evidenceA = proposalA.evidence.slice(0, 2).join('; ');
+    const evidenceB = proposalB.evidence.slice(0, 2).join('; ');
+    
+    return `Judge two proposals. Focus on logic and evidence quality.
 
-EVALUATION CRITERIA:
-1. ACCURACY: Logical soundness and likely correctness
-2. REASONING: Quality and depth of analytical reasoning  
-3. EVIDENCE: Strength and relevance of supporting evidence
-4. CLARITY: Clear communication and well-structured argument
+A (${agentNameA}):
+Winner: ${proposalA.winnerId} (${proposalA.confidence})
+Reason: ${rationalA}
+Evidence: ${evidenceA}
 
-IMPORTANT BIAS REDUCTION INSTRUCTIONS:
-- Ignore the length of responses when judging quality
-- Focus on substance over style
-- Don't favor responses simply because they seem more confident
-- Consider both the winner choice AND the reasoning quality
-- Order of presentation should not influence your judgment
+B (${agentNameB}):
+Winner: ${proposalB.winnerId} (${proposalB.confidence})
+Reason: ${rationalB}
+Evidence: ${evidenceB}
 
-PROPOSAL A (${agentNameA}):
-Winner: ${proposalA.winnerId}
-Confidence: ${proposalA.confidence}
-Rationale: ${proposalA.rationale}
-Evidence: ${proposalA.evidence.join('; ')}
-
-PROPOSAL B (${agentNameB}):
-Winner: ${proposalB.winnerId}
-Confidence: ${proposalB.confidence}
-Rationale: ${proposalB.rationale}
-Evidence: ${proposalB.evidence.join('; ')}
-
-Please provide your judgment in the following JSON format:
+Return JSON:
 {
-  "winner": "A" | "B" | "tie",
+  "winner": "A"|"B"|"tie",
   "confidence": 0.0-1.0,
-  "overall_scores": {"A": 0.0-1.0, "B": 0.0-1.0},
+  "overall_scores": {"A": 0-1, "B": 0-1},
   "criteria_scores": {
-    "accuracy": {"A": 0.0-1.0, "B": 0.0-1.0},
-    "reasoning": {"A": 0.0-1.0, "B": 0.0-1.0},
-    "evidence": {"A": 0.0-1.0, "B": 0.0-1.0},
-    "clarity": {"A": 0.0-1.0, "B": 0.0-1.0}
+    "accuracy": {"A": 0-1, "B": 0-1},
+    "reasoning": {"A": 0-1, "B": 0-1},
+    "evidence": {"A": 0-1, "B": 0-1},
+    "clarity": {"A": 0-1, "B": 0-1}
   },
-  "reasoning": ["point 1", "point 2", "point 3"],
-  "key_differences": "main distinguishing factors between the proposals"
+  "reasoning": ["key point"],
+  "key_differences": "main difference"
 }`;
   }
 
   private parseJudgmentResponse(aiResponse: any): PairwiseJudgment {
     try {
-      // The AI response comes through the existing AIService interface
-      // We need to extract judgment information from the metadata or create a custom parsing
+      // Extract the structured judgment data from the AI response
+      // The response should be in the metadata.dataPoints based on how OpenAIService structures it
+      const judgmentData = aiResponse.metadata?.dataPoints || {};
       
-      // For now, we'll create a mock judgment based on the AI response
-      // In a real implementation, you would modify the prompt to get structured judgment data
-      
-      const mockJudgment: PairwiseJudgment = {
-        winner: Math.random() > 0.5 ? 'A' : 'B',
-        confidence: 0.7 + (Math.random() * 0.2),
-        reasoning: [
-          'Analyzed proposal quality and reasoning depth',
-          'Compared evidence strength and relevance',
-          'Evaluated logical consistency and clarity',
-          aiResponse.metadata.reasoning || 'Standard comparative analysis performed'
-        ],
-        scores: {
-          A: 0.6 + (Math.random() * 0.3),
-          B: 0.6 + (Math.random() * 0.3)
-        },
-        criteria: {
-          accuracy: { A: 0.7, B: 0.6 },
-          reasoning: { A: 0.8, B: 0.7 },
-          evidence: { A: 0.6, B: 0.8 },
-          clarity: { A: 0.7, B: 0.7 }
-        }
+      // Try to parse as structured judgment if available
+      let winner: 'A' | 'B' | 'tie' = 'tie';
+      let confidence = 0.5;
+      let overallScores = { A: 0.5, B: 0.5 };
+      let criteriaScores = {
+        accuracy: { A: 0.5, B: 0.5 },
+        reasoning: { A: 0.5, B: 0.5 },
+        evidence: { A: 0.5, B: 0.5 },
+        clarity: { A: 0.5, B: 0.5 }
       };
-
-      return mockJudgment;
+      let reasoning: string[] = [];
+      
+      // Check if we got proper judgment structure
+      if (judgmentData.winner) {
+        winner = judgmentData.winner as 'A' | 'B' | 'tie';
+      } else if (aiResponse.winnerId === 'proposal_a') {
+        winner = 'A';
+      } else if (aiResponse.winnerId === 'proposal_b') {
+        winner = 'B';
+      }
+      
+      if (judgmentData.confidence !== undefined) {
+        confidence = judgmentData.confidence;
+      } else if (aiResponse.metadata?.confidence) {
+        confidence = aiResponse.metadata.confidence;
+      }
+      
+      if (judgmentData.overall_scores) {
+        overallScores = judgmentData.overall_scores;
+      }
+      
+      if (judgmentData.criteria_scores) {
+        criteriaScores = judgmentData.criteria_scores;
+      }
+      
+      if (judgmentData.reasoning && Array.isArray(judgmentData.reasoning)) {
+        reasoning = judgmentData.reasoning;
+      } else if (aiResponse.metadata?.reasoning) {
+        reasoning = [aiResponse.metadata.reasoning];
+      } else {
+        reasoning = ['Analysis completed'];
+      }
+      
+      return {
+        winner,
+        confidence,
+        reasoning,
+        scores: overallScores,
+        criteria: criteriaScores
+      };
 
     } catch (error) {
       logger.error('Failed to parse LLM judgment response', {
