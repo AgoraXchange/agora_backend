@@ -69,15 +69,16 @@ export class MonitorContractsUseCase {
       });
 
       // Create Party entities with simplified data
+      // Use contractId:choice format for clean blockchain integration
       const partyA = new Party(
-        `party_a_${event.contractId}`,
+        `${event.contractId}:1`,  // contractId:1 for Choice.A
         '', // address will be retrieved from blockchain if needed
         event.partyA,  // Simple string name from contract
         event.partyA   // Using name as description for now
       );
 
       const partyB = new Party(
-        `party_b_${event.contractId}`,
+        `${event.contractId}:2`,  // contractId:2 for Choice.B
         '', // address will be retrieved from blockchain if needed  
         event.partyB,  // Simple string name from contract
         event.partyB   // Using name as description for now
