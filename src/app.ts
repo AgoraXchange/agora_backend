@@ -22,6 +22,17 @@ try {
 export function createApp() {
   const app = express();
 
+  // Health check FIRST - before any middleware to ensure fast Railway response
+  app.get('/health', (req, res) => {
+    res.status(200).json({
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      environment: process.env.NODE_ENV || 'development',
+      uptime: process.uptime(),
+      version: packageVersion
+    });
+  });
+
   // Security middleware
   app.use(helmet({
     contentSecurityPolicy: {
@@ -66,17 +77,6 @@ export function createApp() {
       userAgent: req.headers['user-agent']
     });
     next();
-  });
-
-  // Simplified health check route - lightweight and fast for Railway compatibility
-  app.get('/health', (req, res) => {
-    res.status(200).json({
-      status: 'ok',
-      timestamp: new Date().toISOString(),
-      environment: process.env.NODE_ENV || 'development',
-      uptime: process.uptime(),
-      version: packageVersion
-    });
   });
 
   // API routes
