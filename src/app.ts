@@ -5,12 +5,9 @@ import dotenv from 'dotenv';
 import { createOracleRoutes } from './interfaces/routes/oracleRoutes';
 import { createAuthRoutes } from './interfaces/routes/authRoutes';
 import { createDeliberationRoutes } from './interfaces/routes/deliberationRoutes';
-import { errorHandler, notFoundHandler, asyncHandler } from './interfaces/middleware/errorMiddleware';
+import { errorHandler, notFoundHandler } from './interfaces/middleware/errorMiddleware';
 import { apiRateLimiter } from './interfaces/middleware/rateLimitMiddleware';
 import { logger } from './infrastructure/logging/Logger';
-import { container } from './container';
-import { MongoDBConnection } from './infrastructure/database/MongoDBConnection';
-import { readinessTracker } from './infrastructure/readiness/ReadinessTracker';
 
 dotenv.config();
 
@@ -71,106 +68,16 @@ export function createApp() {
     next();
   });
 
-  // Enhanced health check route with readiness tracking and comprehensive error handling
-  app.get('/health', asyncHandler(async (req, res) => {
-    const startTime = Date.now();
-    
-    try {
-      // All potentially failing operations are now inside try-catch
-      const readinessStatus = readinessTracker.getReadinessStatus();
-      const isReady = readinessStatus.overall;
-      
-      const healthStatus: any = {
-        status: isReady ? 'ready' : 'starting',
-        timestamp: new Date().toISOString(),
-        environment: process.env.NODE_ENV || 'development',
-        uptime: process.uptime(),
-        version: packageVersion, // Use pre-loaded version instead of require()
-        readiness: {
-          ready: isReady,
-          components: readinessStatus.components,
-          notReadyComponents: readinessTracker.getNotReadyComponents()
-        },
-        services: {}
-      };
-
-      // Check MongoDB connection if enabled
-      if (process.env.USE_MONGODB === 'true') {
-        try {
-          const mongoConnection = container.get<MongoDBConnection>('MongoDBConnection');
-          // Try a simple ping operation
-          await mongoConnection.getDb().admin().ping();
-          healthStatus.services.mongodb = { status: 'healthy', connection: 'active' };
-        } catch (error) {
-          healthStatus.status = 'degraded';
-          healthStatus.services.mongodb = { 
-            status: 'unhealthy', 
-            error: error instanceof Error ? error.message : 'Unknown error' 
-          };
-        }
-      } else {
-        healthStatus.services.mongodb = { status: 'disabled' };
-      }
-
-      // Check if container dependency is available (cached after first check)
-      if (!app.locals.blockchainServiceStatus) {
-        try {
-          container.get('IBlockchainService');
-          app.locals.blockchainServiceStatus = { status: 'available', checkedAt: Date.now() };
-        } catch (error) {
-          app.locals.blockchainServiceStatus = { status: 'unavailable', error: error instanceof Error ? error.message : 'Unknown error', checkedAt: Date.now() };
-        }
-      }
-      
-      healthStatus.services.blockchain = { 
-        status: app.locals.blockchainServiceStatus.status,
-        lastChecked: new Date(app.locals.blockchainServiceStatus.checkedAt).toISOString()
-      };
-      
-      if (app.locals.blockchainServiceStatus.status === 'unavailable') {
-        if (healthStatus.status !== 'degraded') {
-          healthStatus.status = 'degraded';
-        }
-      }
-
-      // Add response time
-      healthStatus.responseTime = `${Date.now() - startTime}ms`;
-
-      // Set appropriate HTTP status based on readiness and health
-      // Railway needs 200 OK for degraded mode to pass health checks
-      let httpStatus = 200; // Always return 200 for Railway compatibility
-      
-      // Only return 503 if there are actual service failures (not just env validation)
-      const hasServiceFailures = healthStatus.services.mongodb?.status === 'unhealthy' || 
-                                 healthStatus.services.blockchain?.status === 'unavailable';
-      
-      if (hasServiceFailures) {
-        httpStatus = 503; // Service Unavailable - actual service failures
-      }
-      
-      res.status(httpStatus).json(healthStatus);
-      
-    } catch (error) {
-      // Comprehensive error handling for any failure in the health check
-      logger.error('Health check failed', { 
-        error: error instanceof Error ? error.message : 'Unknown error',
-        stack: error instanceof Error ? error.stack : undefined
-      });
-      
-      res.status(503).json({
-        status: 'error',
-        timestamp: new Date().toISOString(),
-        error: error instanceof Error ? error.message : 'Health check failed',
-        responseTime: `${Date.now() - startTime}ms`,
-        readiness: {
-          ready: false,
-          // Safe fallback values in case readinessTracker calls fail
-          components: {},
-          notReadyComponents: []
-        }
-      });
-    }
-  }));
+  // Simplified health check route - lightweight and fast for Railway compatibility
+  app.get('/health', (req, res) => {
+    res.status(200).json({
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      environment: process.env.NODE_ENV || 'development',
+      uptime: process.uptime(),
+      version: packageVersion
+    });
+  });
 
   // API routes
   app.use('/api/auth', createAuthRoutes());
