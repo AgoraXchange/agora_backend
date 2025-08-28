@@ -1,5 +1,5 @@
 import { injectable, inject } from 'inversify';
-import { IAgentService } from '../../domain/services/IAgentService';
+import { IAgentService, IConsensusResult } from '../../domain/services/IAgentService';
 import { AgentProposal } from '../../domain/entities/AgentProposal';
 import { JudgeEvaluation, EvaluationCriteria, PairwiseResult } from '../../domain/entities/JudgeEvaluation';
 import { ConsensusResult } from '../../domain/valueObjects/ConsensusResult';
@@ -298,7 +298,7 @@ export class MessageCollector {
   /**
    * Collects the final synthesis result
    */
-  collectSynthesis(result: ConsensusResult, method: string): void {
+  collectSynthesis(result: IConsensusResult, method: string): void {
     const message = DeliberationMessage.createSynthesis(
       result.finalWinner,
       result.confidenceLevel,
@@ -397,7 +397,7 @@ export class MessageCollector {
   buildVisualization(
     proposals: AgentProposal[],
     evaluations: JudgeEvaluation[],
-    consensus: ConsensusResult,
+    consensus: IConsensusResult,
     votingData: VotingData,
     committeeDecisionId: string
   ): DeliberationVisualization {

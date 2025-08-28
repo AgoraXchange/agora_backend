@@ -24,7 +24,8 @@ export class MongoDBConnection {
       
       logger.info('Connected to MongoDB', { dbName });
     } catch (error) {
-      logger.error('Failed to connect to MongoDB', { error: error.message });
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      logger.error('Failed to connect to MongoDB', { error: errorMessage });
       throw error;
     }
   }

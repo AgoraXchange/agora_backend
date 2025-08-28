@@ -1,6 +1,7 @@
 import { injectable } from 'inversify';
 import { AgentProposal } from '../../../domain/entities/AgentProposal';
 import { PairwiseComparison } from '../../../domain/services/IAgentService';
+import { Party } from '../../../domain/entities/Party';
 import { OpenAIService } from '../../ai/OpenAIService';
 import { logger } from '../../logging/Logger';
 
@@ -149,20 +150,20 @@ export class LLMJudge {
     const prompt = this.createJudgmentPrompt(proposalA, proposalB, round);
     
     const response = await this.aiService.analyzeAndDecideWinner({
-      partyA: { 
-        id: 'proposal_a', 
-        address: 'judge_analysis', 
-        name: 'Proposal A', 
-        description: 'Analysis candidate A' 
-      },
-      partyB: { 
-        id: 'proposal_b', 
-        address: 'judge_analysis', 
-        name: 'Proposal B', 
-        description: 'Analysis candidate B' 
-      },
+      partyA: new Party(
+        'proposal_a',
+        'judge_analysis',
+        'Proposal A',
+        'Analysis candidate A'
+      ),
+      partyB: new Party(
+        'proposal_b', 
+        'judge_analysis',
+        'Proposal B', 
+        'Analysis candidate B'
+      ),
       contractId: `judge_comparison_${round}`,
-      context: { prompt }
+      additionalContext: { prompt }
     });
 
     return this.parseJudgmentResponse(response);

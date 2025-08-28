@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { container } from '../../container';
 import { DeliberationVisualizationController } from '../controllers/DeliberationVisualizationController';
 import { authenticate, authorize } from '../middleware/authMiddleware';
+import { UserRole } from '../../domain/entities/User';
 import { apiRateLimiter } from '../middleware/rateLimitMiddleware';
 import { asyncHandler } from '../middleware/errorMiddleware';
 import { validate } from '../middleware/validationMiddleware';
@@ -24,7 +25,7 @@ const getController = () => container.get<DeliberationVisualizationController>('
 router.get(
   '/:id',
   authenticate,
-  authorize('ADMIN', 'ORACLE_NODE'),
+  authorize(UserRole.ADMIN, UserRole.ORACLE_NODE),
   apiRateLimiter,
   validate(getDeliberationSchema),
   asyncHandler(async (req, res) => {
@@ -58,7 +59,7 @@ router.get(
 router.get(
   '/:id/messages',
   authenticate,
-  authorize('ADMIN', 'ORACLE_NODE'),
+  authorize(UserRole.ADMIN, UserRole.ORACLE_NODE),
   apiRateLimiter,
   validate(getDeliberationMessagesSchema),
   asyncHandler(async (req, res) => {
@@ -75,7 +76,7 @@ router.get(
 router.get(
   '/:id/export',
   authenticate,
-  authorize('ADMIN', 'ORACLE_NODE'),
+  authorize(UserRole.ADMIN, UserRole.ORACLE_NODE),
   apiRateLimiter,
   validate(exportDeliberationSchema),
   asyncHandler(async (req, res) => {

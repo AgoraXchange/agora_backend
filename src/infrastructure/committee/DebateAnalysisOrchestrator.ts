@@ -334,9 +334,9 @@ export class DebateAnalysisOrchestrator {
       report.contractId,
       report.id,
       [], // 배심원 없음
+      true, // 즉시 결정이므로 만장일치로 간주
       [], // 토론 없음
       verdict,
-      true, // 즉시 결정이므로 만장일치로 간주
       [],
       0
     );
@@ -352,9 +352,9 @@ export class DebateAnalysisOrchestrator {
       contractId,
       'failed_report',
       [],
+      false,
       [],
       Choice.UNDECIDED,
-      false,
       [],
       0
     );

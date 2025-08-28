@@ -1,3 +1,5 @@
+import { IJudgeEvaluation } from '../services/IAgentService';
+
 export interface EvaluationCriteria {
   completeness: number;      // 0-1: How complete is the analysis
   consistency: number;       // 0-1: Internal logical consistency
@@ -13,7 +15,7 @@ export interface PairwiseResult {
   reasoning: string;
 }
 
-export class JudgeEvaluation {
+export class JudgeEvaluation implements IJudgeEvaluation {
   constructor(
     public readonly id: string,
     public readonly proposalId: string,

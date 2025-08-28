@@ -29,15 +29,16 @@ const logger = winston.createLogger({
   ]
 });
 
-if (process.env.NODE_ENV !== 'production') {
-  logger.add(
-    new winston.transports.Console({
-      format: winston.format.combine(
-        winston.format.colorize(),
-        winston.format.simple()
-      )
-    })
-  );
-}
+// Always add console transport for Railway visibility
+// In production, disable colors; otherwise enable them
+const isProduction = process.env.NODE_ENV === 'production';
+logger.add(
+  new winston.transports.Console({
+    format: winston.format.combine(
+      winston.format.colorize({ all: !isProduction }),
+      winston.format.simple()
+    )
+  })
+);
 
 export { logger };

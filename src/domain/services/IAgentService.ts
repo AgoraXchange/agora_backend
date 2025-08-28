@@ -60,7 +60,7 @@ export interface IJudgeService {
   /**
    * Generates ranking from multiple evaluations
    */
-  generateRanking(evaluations: JudgeEvaluation[]): Promise<ProposalRanking>;
+  generateRanking(evaluations: IJudgeEvaluation[]): Promise<ProposalRanking>;
 }
 
 export interface ISynthesizerService {
@@ -69,8 +69,8 @@ export interface ISynthesizerService {
    */
   synthesizeConsensus(
     rankedProposals: AgentProposal[],
-    evaluations: JudgeEvaluation[]
-  ): Promise<ConsensusResult>;
+    evaluations: IJudgeEvaluation[]
+  ): Promise<IConsensusResult>;
 }
 
 export interface RuleBasedEvaluation {
@@ -89,13 +89,41 @@ export interface PairwiseComparison {
   confidence: number;
 }
 
-export interface JudgeEvaluation {
+export interface IJudgeEvaluation {
+  id: string;
   proposalId: string;
+  judgeId: string;
+  judgeName: string;
   ruleBasedScore: number;
-  pairwiseWins: number;
-  pairwiseLosses: number;
-  averageScore: number;
+  criteria: {
+    completeness: number;
+    consistency: number;
+    evidenceQuality: number;
+    clarity: number;
+    relevance: number;
+  };
+  pairwiseResults: {
+    opponentProposalId: string;
+    result: 'win' | 'lose' | 'tie';
+    score: number;
+    reasoning: string;
+  }[];
+  overallScore: number;
   reasoning: string[];
+  confidence: number;
+  metadata: {
+    evaluationTimeMs: number;
+    tokenUsage?: number;
+    evaluationMethod: string;
+  };
+  createdAt: Date;
+  
+  // Methods
+  getPairwiseWinRate(): number;
+  getAveragePairwiseScore(): number;
+  getWeightedScore(ruleWeight?: number, llmWeight?: number): number;
+  getCriteriaAverage(): number;
+  isHighQuality(): boolean;
 }
 
 export interface ProposalRanking {
@@ -104,10 +132,37 @@ export interface ProposalRanking {
   confidenceLevel: number;
 }
 
-export interface ConsensusResult {
+export interface IConsensusResult {
   finalWinner: string;
-  mergedEvidence: string[];
   confidenceLevel: number;
   residualUncertainty: number;
+  mergedEvidence: {
+    source: string;
+    relevance: number;
+    credibility: number;
+    snippet?: string;
+  }[];
+  synthesizedReasoning: string;
   methodology: string;
+  metrics: {
+    unanimityLevel: number;
+    confidenceVariance: number;
+    evidenceOverlap: number;
+    reasoning: {
+      sharedPoints: string[];
+      conflictingPoints: string[];
+      uniqueInsights: string[];
+    };
+  };
+  alternativeChoices: {
+    choice: string;
+    probability: number;
+    reasoning: string;
+  }[];
+  qualityFlags: {
+    hasMinorityDissent: boolean;
+    hasInsufficientEvidence: boolean;
+    hasConflictingEvidence: boolean;
+    requiresHumanReview: boolean;
+  };
 }

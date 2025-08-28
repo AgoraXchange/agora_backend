@@ -1,4 +1,4 @@
-import jwt from 'jsonwebtoken';
+import jwt, { SignOptions } from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import { injectable } from 'inversify';
 import { AppError } from '../../domain/errors/AppError';
@@ -52,11 +52,11 @@ export class JwtService {
 
     const accessToken = jwt.sign(payload, this.accessTokenSecret, {
       expiresIn: this.accessTokenExpiry
-    });
+    } as SignOptions);
 
     const refreshToken = jwt.sign(payload, this.refreshTokenSecret, {
       expiresIn: this.refreshTokenExpiry
-    });
+    } as SignOptions);
 
     logger.info('Generated tokens for user', { userId: user.id });
 

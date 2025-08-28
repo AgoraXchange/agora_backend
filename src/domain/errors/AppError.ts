@@ -49,4 +49,8 @@ export class AppError extends Error {
   static rateLimitExceeded(message = 'Rate limit exceeded'): AppError {
     return new AppError(ErrorCode.RATE_LIMIT_EXCEEDED, message, 429);
   }
+
+  static badRequest(message = 'Bad request'): AppError {
+    return new AppError(ErrorCode.VALIDATION_ERROR, message, 400);
+  }
 }

@@ -3,10 +3,11 @@ import {
   IJudgeService, 
   RuleBasedEvaluation, 
   PairwiseComparison, 
-  JudgeEvaluation, 
+  IJudgeEvaluation, 
   ProposalRanking 
 } from '../../../domain/services/IAgentService';
 import { AgentProposal } from '../../../domain/entities/AgentProposal';
+import { JudgeEvaluation } from '../../../domain/entities/JudgeEvaluation';
 import { RuleBasedJudge } from './RuleBasedJudge';
 import { LLMJudge } from './LLMJudge';
 import { logger } from '../../logging/Logger';
@@ -40,7 +41,7 @@ export class CommitteeJudgeService implements IJudgeService {
     return await this.llmJudge.performPairwiseComparison(proposalA, proposalB, rounds);
   }
 
-  async generateRanking(evaluations: JudgeEvaluation[]): Promise<ProposalRanking> {
+  async generateRanking(evaluations: IJudgeEvaluation[]): Promise<ProposalRanking> {
     if (evaluations.length === 0) {
       return {
         rankedProposals: [],
@@ -95,7 +96,7 @@ export class CommitteeJudgeService implements IJudgeService {
 
   // Comprehensive evaluation combining all judgment methods
   async comprehensiveEvaluation(proposals: AgentProposal[]): Promise<{
-    evaluations: JudgeEvaluation[];
+    evaluations: IJudgeEvaluation[];
     ranking: ProposalRanking;
     metadata: {
       ruleBasedEvaluation: RuleBasedEvaluation;
@@ -132,7 +133,7 @@ export class CommitteeJudgeService implements IJudgeService {
       pairwiseResults.forEach(result => pairwiseComparisons.push(result.comparison));
 
       // Step 3: Create comprehensive evaluations
-      const evaluations: JudgeEvaluation[] = proposals.map(proposal => {
+      const evaluations: IJudgeEvaluation[] = proposals.map(proposal => {
         return this.createComprehensiveEvaluation(
           proposal, 
           ruleBasedEvaluation, 
@@ -174,7 +175,7 @@ export class CommitteeJudgeService implements IJudgeService {
     proposal: AgentProposal,
     ruleBasedEvaluation: RuleBasedEvaluation,
     pairwiseResults: { comparison: PairwiseComparison; proposalAId: string; proposalBId: string }[]
-  ): JudgeEvaluation {
+  ): IJudgeEvaluation {
     // Extract rule-based scores
     const ruleBasedScore = ruleBasedEvaluation.scores[proposal.id] || 0;
     const criteria = {
@@ -207,7 +208,7 @@ export class CommitteeJudgeService implements IJudgeService {
       'Committee Comprehensive Judge',
       ruleBasedScore,
       criteria,
-      pairwiseResults,
+      proposalPairwiseResults,
       overallScore,
       reasoning,
       confidence,

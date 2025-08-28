@@ -1,6 +1,7 @@
 import { injectable } from 'inversify';
-import { ISynthesizerService, ConsensusResult } from '../../../domain/services/IAgentService';
+import { ISynthesizerService, IConsensusResult, IJudgeEvaluation } from '../../../domain/services/IAgentService';
 import { AgentProposal } from '../../../domain/entities/AgentProposal';
+import { Party } from '../../../domain/entities/Party';
 import { JudgeEvaluation } from '../../../domain/entities/JudgeEvaluation';
 import { ConsensusResult as ConsensusResultEntity } from '../../../domain/valueObjects/ConsensusResult';
 import { EvidenceSource, ConsensusMetrics } from '../../../domain/valueObjects/ConsensusResult';
@@ -30,8 +31,8 @@ export class ConsensusSynthesizer implements ISynthesizerService {
 
   async synthesizeConsensus(
     rankedProposals: AgentProposal[],
-    evaluations: JudgeEvaluation[]
-  ): Promise<ConsensusResult> {
+    evaluations: IJudgeEvaluation[]
+  ): Promise<IConsensusResult> {
     logger.info('Starting consensus synthesis', {
       proposalCount: rankedProposals.length,
       evaluationCount: evaluations.length,
@@ -63,23 +64,24 @@ export class ConsensusSynthesizer implements ISynthesizerService {
       // Step 6: Generate alternative scenarios
       const alternativeChoices = this.generateAlternativeChoices(rankedProposals, evaluations, winnerResult.winner);
 
-      const consensusResult = new ConsensusResultEntity(
-        winnerResult.winner,
-        adjustedConfidence,
-        residualUncertainty,
+      // Create consensus result that implements IConsensusResult interface
+      const consensusResult: IConsensusResult = {
+        finalWinner: winnerResult.winner,
+        confidenceLevel: adjustedConfidence,
+        residualUncertainty: residualUncertainty,
         mergedEvidence,
         synthesizedReasoning,
-        `${this.config.consensusMethod}_consensus`,
+        methodology: `${this.config.consensusMethod}_consensus`,
         metrics,
         alternativeChoices,
         qualityFlags
-      );
+      };
 
       logger.info('Consensus synthesis completed', {
         finalWinner: winnerResult.winner,
         confidence: adjustedConfidence,
         uncertainty: residualUncertainty,
-        consensusStrength: consensusResult.getConsensusStrength()
+        method: this.config.consensusMethod
       });
 
       return consensusResult;
@@ -94,7 +96,7 @@ export class ConsensusSynthesizer implements ISynthesizerService {
 
   private determineWinner(
     proposals: AgentProposal[], 
-    evaluations: JudgeEvaluation[]
+    evaluations: IJudgeEvaluation[]
   ): { winner: string; confidence: number } {
     const evaluationMap = new Map(evaluations.map(e => [e.proposalId, e]));
     
@@ -147,7 +149,7 @@ export class ConsensusSynthesizer implements ISynthesizerService {
 
   private bordaCount(
     proposals: AgentProposal[], 
-    evaluations: JudgeEvaluation[]
+    evaluations: IJudgeEvaluation[]
   ): { winner: string; confidence: number } {
     const bordaScores: Record<string, number> = {};
     const evaluationMap = new Map(evaluations.map(e => [e.proposalId, e]));
@@ -187,7 +189,7 @@ export class ConsensusSynthesizer implements ISynthesizerService {
 
   private weightedVoting(
     proposals: AgentProposal[],
-    evaluationMap: Map<string, JudgeEvaluation>
+    evaluationMap: Map<string, IJudgeEvaluation>
   ): { winner: string; confidence: number } {
     const weightedScores: Record<string, number> = {};
     let totalWeight = 0;
@@ -225,7 +227,7 @@ export class ConsensusSynthesizer implements ISynthesizerService {
 
   private approvalVoting(
     proposals: AgentProposal[],
-    evaluationMap: Map<string, JudgeEvaluation>
+    evaluationMap: Map<string, IJudgeEvaluation>
   ): { winner: string; confidence: number } {
     const approvalThreshold = 0.7; // Proposals above this score get approval
     const approvalCounts: Record<string, number> = {};
@@ -303,7 +305,7 @@ export class ConsensusSynthesizer implements ISynthesizerService {
 
   private calculateConsensusMetrics(
     proposals: AgentProposal[],
-    evaluations: JudgeEvaluation[],
+    evaluations: IJudgeEvaluation[],
     winner: string
   ): ConsensusMetrics {
     const winningProposals = proposals.filter(p => p.winnerId === winner);
@@ -362,7 +364,7 @@ export class ConsensusSynthesizer implements ISynthesizerService {
 
   private async synthesizeReasoning(
     proposals: AgentProposal[],
-    evaluations: JudgeEvaluation[],
+    evaluations: IJudgeEvaluation[],
     winner: string,
     evidence: EvidenceSource[]
   ): Promise<string> {
@@ -374,10 +376,10 @@ export class ConsensusSynthesizer implements ISynthesizerService {
       const prompt = this.createSynthesisPrompt(proposals, evaluations, winner, evidence);
       
       const aiResponse = await this.aiService.analyzeAndDecideWinner({
-        partyA: { id: 'synthesis', address: 'ai_synthesis', name: 'Synthesis A', description: 'Synthesis task' },
-        partyB: { id: 'synthesis', address: 'ai_synthesis', name: 'Synthesis B', description: 'Synthesis task' },
+        partyA: new Party('synthesis', 'ai_synthesis', 'Synthesis A', 'Synthesis task'),
+        partyB: new Party('synthesis', 'ai_synthesis', 'Synthesis B', 'Synthesis task'),
         contractId: 'consensus_synthesis',
-        context: { synthesisPrompt: prompt }
+        additionalContext: { synthesisPrompt: prompt }
       });
 
       return aiResponse.metadata.reasoning || this.createBasicSynthesis(proposals, winner, evidence);
@@ -402,7 +404,7 @@ export class ConsensusSynthesizer implements ISynthesizerService {
 
   private createSynthesisPrompt(
     proposals: AgentProposal[],
-    evaluations: JudgeEvaluation[],
+    evaluations: IJudgeEvaluation[],
     winner: string,
     evidence: EvidenceSource[]
   ): string {
@@ -493,7 +495,7 @@ Please provide a clear, comprehensive synthesis explaining why ${winner} was cho
 
   private generateAlternativeChoices(
     proposals: AgentProposal[],
-    evaluations: JudgeEvaluation[],
+    evaluations: IJudgeEvaluation[],
     winner: string
   ) {
     const alternatives = proposals

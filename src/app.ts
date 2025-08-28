@@ -8,6 +8,9 @@ import { createDeliberationRoutes } from './interfaces/routes/deliberationRoutes
 import { errorHandler, notFoundHandler } from './interfaces/middleware/errorMiddleware';
 import { apiRateLimiter } from './interfaces/middleware/rateLimitMiddleware';
 import { logger } from './infrastructure/logging/Logger';
+import { container } from './container';
+import { MongoDBConnection } from './infrastructure/database/MongoDBConnection';
+import { readinessTracker } from './infrastructure/readiness/ReadinessTracker';
 
 dotenv.config();
 
@@ -60,13 +63,85 @@ export function createApp() {
     next();
   });
 
-  // Health check route
-  app.get('/health', (req, res) => {
-    res.json({ 
-      status: 'ok', 
+  // Enhanced health check route with readiness tracking
+  app.get('/health', async (req, res) => {
+    const startTime = Date.now();
+    const readinessStatus = readinessTracker.getReadinessStatus();
+    const isReady = readinessStatus.overall;
+    
+    const healthStatus: any = {
+      status: isReady ? 'ready' : 'starting',
       timestamp: new Date().toISOString(),
-      environment: process.env.NODE_ENV || 'development'
-    });
+      environment: process.env.NODE_ENV || 'development',
+      uptime: process.uptime(),
+      version: require('../package.json').version || '1.0.0',
+      readiness: {
+        ready: isReady,
+        components: readinessStatus.components,
+        notReadyComponents: readinessTracker.getNotReadyComponents()
+      },
+      services: {}
+    };
+
+    try {
+      // Check MongoDB connection if enabled
+      if (process.env.USE_MONGODB === 'true') {
+        try {
+          const mongoConnection = container.get<MongoDBConnection>('MongoDBConnection');
+          // Try a simple ping operation
+          await mongoConnection.getDb().admin().ping();
+          healthStatus.services.mongodb = { status: 'healthy', connection: 'active' };
+        } catch (error) {
+          healthStatus.status = 'degraded';
+          healthStatus.services.mongodb = { 
+            status: 'unhealthy', 
+            error: error instanceof Error ? error.message : 'Unknown error' 
+          };
+        }
+      } else {
+        healthStatus.services.mongodb = { status: 'disabled' };
+      }
+
+      // Check if container dependency is available
+      try {
+        container.get('IBlockchainService');
+        healthStatus.services.blockchain = { status: 'available' };
+      } catch (error) {
+        healthStatus.services.blockchain = { status: 'unavailable' };
+        if (healthStatus.status !== 'degraded') {
+          healthStatus.status = 'degraded';
+        }
+      }
+
+      // Add response time
+      healthStatus.responseTime = `${Date.now() - startTime}ms`;
+
+      // Set appropriate HTTP status based on readiness and health
+      // Railway needs 200 OK for degraded mode to pass health checks
+      let httpStatus = 200; // Always return 200 for Railway compatibility
+      
+      // Only return 503 if there are actual service failures (not just env validation)
+      const hasServiceFailures = healthStatus.services.mongodb?.status === 'unhealthy' || 
+                                 healthStatus.services.blockchain?.status === 'unavailable';
+      
+      if (hasServiceFailures) {
+        httpStatus = 503; // Service Unavailable - actual service failures
+      }
+      
+      res.status(httpStatus).json(healthStatus);
+    } catch (error) {
+      res.status(503).json({
+        status: 'error',
+        timestamp: new Date().toISOString(),
+        error: error instanceof Error ? error.message : 'Health check failed',
+        responseTime: `${Date.now() - startTime}ms`,
+        readiness: {
+          ready: false,
+          components: readinessStatus.components,
+          notReadyComponents: readinessTracker.getNotReadyComponents()
+        }
+      });
+    }
   });
 
   // API routes

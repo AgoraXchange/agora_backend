@@ -174,7 +174,7 @@ export class CommitteeOrchestrator implements ICommitteeService {
           contractId: input.contractId,
           partyA: input.partyA,
           partyB: input.partyB,
-          context: input.context
+          context: input.additionalContext
         }, maxProposalsPerAgent);
 
         // Collect each proposal for visualization

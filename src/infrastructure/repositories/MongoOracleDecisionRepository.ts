@@ -36,7 +36,8 @@ export class MongoOracleDecisionRepository implements IOracleDecisionRepository 
       await this.collection.createIndex({ createdAt: -1 });
       logger.info('MongoDB indexes created for oracleDecisions collection');
     } catch (error) {
-      logger.error('Failed to create indexes', { error: error.message });
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      logger.error('Failed to create indexes', { error: errorMessage });
     }
   }
 

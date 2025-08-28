@@ -52,7 +52,8 @@ export class MongoContractRepository implements IContractRepository {
       await this.collection.createIndex({ winnerId: 1 });
       logger.info('MongoDB indexes created for contracts collection');
     } catch (error) {
-      logger.error('Failed to create indexes', { error: error.message });
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      logger.error('Failed to create indexes', { error: errorMessage });
     }
   }
 

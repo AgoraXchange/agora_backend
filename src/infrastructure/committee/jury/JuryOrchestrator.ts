@@ -131,9 +131,9 @@ export class JuryOrchestrator implements IJuryService {
         report.contractId,
         report.id,
         initialOpinions,
+        unanimous,
         deliberationRounds,
         finalVerdict,
-        unanimous,
         currentOpinions,
         deliberationTime
       );

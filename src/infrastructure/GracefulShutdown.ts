@@ -67,7 +67,8 @@ export class GracefulShutdown {
       logger.info('Graceful shutdown completed');
       process.exit(0);
     } catch (error) {
-      logger.error('Error during shutdown', { error: error.message });
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      logger.error('Error during shutdown', { error: errorMessage });
       clearTimeout(shutdownTimeout);
       process.exit(1);
     }

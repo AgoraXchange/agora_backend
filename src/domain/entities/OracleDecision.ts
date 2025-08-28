@@ -3,6 +3,9 @@ export interface DecisionMetadata {
   reasoning: string;
   dataPoints: Record<string, any>;
   timestamp: Date;
+  // Committee-specific properties
+  deliberationMode?: string;
+  committeeDecisionId?: string;
 }
 
 export class OracleDecision {

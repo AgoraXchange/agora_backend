@@ -21,7 +21,13 @@
     "test:e2e:interactive": "ts-node scripts/e2e-oracle-test.ts",
     "test:e2e:batch": "NODE_ENV=test ts-node -e \"const scenarios=['sports','crypto','election','climate','oscars']; scenarios.forEach(s => require('child_process').execSync('SCENARIO='+s+' npm run test:e2e:mock', {stdio:'inherit'}));\"",
     "test:e2e:auto-mock": "NODE_ENV=test npx ts-node scripts/run-e2e-test-automated.ts",
-    "test:e2e:auto-real": "NODE_ENV=production npx ts-node scripts/run-e2e-test-real.ts"
+    "test:e2e:auto-real": "NODE_ENV=production npx ts-node scripts/run-e2e-test-real.ts",
+    "railway:local": "railway run npm start",
+    "railway:dev": "railway run npm run dev", 
+    "railway:check": "node scripts/check-railway-env.js",
+    "railway:variables": "railway variables",
+    "railway:logs": "railway logs",
+    "railway:status": "railway status"
   },
   "keywords": [
     "ethereum",

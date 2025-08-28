@@ -115,12 +115,12 @@ export class DiscussionManager {
       speaker.jurorId,
       speaker.jurorName,
       statementText,
-      undefined, // 전체를 향한 발언
       'support',
-      undefined,
       speaker.confidenceLevel > 0.7 ? 'assertive' : 
         speaker.currentPosition === 'UNDECIDED' ? 'questioning' : 'neutral',
-      speaker.confidenceLevel
+      speaker.confidenceLevel,
+      undefined, // 전체를 향한 발언
+      undefined
     );
   }
   
@@ -178,11 +178,11 @@ export class DiscussionManager {
           `${leastConfident.jurorName}님, 제 입장을 재고해 주시기 바랍니다. 
           ${mostConfident.keyArguments[0]}는 명백한 증거입니다. 
           ${mostConfident.currentPosition} 주장이 ${(mostConfident.confidenceLevel * 100).toFixed(0)}% 확실합니다.`,
-          leastConfident.jurorId,
           'challenge',
-          undefined,
           'assertive',
-          0.8 // 높은 설득 의도
+          0.8, // 높은 설득 의도
+          leastConfident.jurorId,
+          undefined
         );
         
         persuasions.push(persuasion);
@@ -221,11 +221,11 @@ export class DiscussionManager {
           undecided.jurorId,
           undecided.jurorName,
           `${mostConfident.jurorName}님, ${mostConfident.currentPosition} 주장의 핵심 근거를 더 설명해 주시겠습니까?`,
-          mostConfident.jurorId,
           'question',
-          undefined,
           'questioning',
-          0.3
+          0.3,
+          mostConfident.jurorId,
+          undefined
         );
         
         questions.push(question);

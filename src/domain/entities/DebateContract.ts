@@ -25,15 +25,15 @@ export class DebateContract {
     public readonly description: string,       // 주제 설명
     public readonly argumentA: string,         // A 주장
     public readonly argumentB: string,         // B 주장
-    public comments: DebateComment[],          // 모든 토론 댓글
     public readonly bettingEndTime: Date,
-    public status: ContractStatus,
-    public winner?: Choice,                    // 승자 선택
-    public readonly totalPoolA: number = 0,
-    public readonly totalPoolB: number = 0,
     public readonly partyRewardPercentage: number,
     public readonly minBetAmount: number,
     public readonly maxBetAmount: number,
+    public comments: DebateComment[] = [],     // 모든 토론 댓글
+    public status: ContractStatus = ContractStatus.CREATED,
+    public winner?: Choice,                    // 승자 선택
+    public readonly totalPoolA: number = 0,
+    public readonly totalPoolB: number = 0,
     public readonly totalBettors: number = 0
   ) {}
 

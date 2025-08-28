@@ -168,11 +168,11 @@ export abstract class BaseJuror implements IJuror {
       this.jurorId,
       this.jurorName,
       statement,
-      otherOpinion.jurorId,
       argumentType,
-      undefined,
       emotionalTone,
-      agree ? 0.2 : 0.6
+      agree ? 0.2 : 0.6,
+      otherOpinion.jurorId,
+      undefined
     );
   }
 
@@ -225,11 +225,11 @@ export abstract class BaseJuror implements IJuror {
         this.jurorId,
         this.jurorName,
         `설득력 있는 논거입니다. 제 입장을 재고하겠습니다.`,
-        argument.speakerId,
         'concession',
-        undefined,
         'conciliatory',
-        0.1
+        0.1,
+        argument.speakerId,
+        undefined
       );
     } else {
       // 의견 유지
@@ -238,11 +238,11 @@ export abstract class BaseJuror implements IJuror {
         this.jurorId,
         this.jurorName,
         await this.generateResistanceStatement(argument, myCurrentOpinion),
-        argument.speakerId,
         'response',
-        undefined,
         'assertive',
-        0.7
+        0.7,
+        argument.speakerId,
+        undefined
       );
     }
     
@@ -260,11 +260,11 @@ export abstract class BaseJuror implements IJuror {
       this.jurorId,
       this.jurorName,
       answer,
-      question.speakerId,
       'response',
-      question.referencePoint,
       'neutral',
-      0.3
+      0.3,
+      question.speakerId,
+      question.referencePoint
     );
   }
 

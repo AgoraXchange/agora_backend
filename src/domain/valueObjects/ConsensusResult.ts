@@ -1,3 +1,5 @@
+import { IConsensusResult } from '../services/IAgentService';
+
 export interface EvidenceSource {
   source: string;
   relevance: number;
@@ -16,7 +18,7 @@ export interface ConsensusMetrics {
   };
 }
 
-export class ConsensusResult {
+export class ConsensusResult implements IConsensusResult {
   constructor(
     public readonly finalWinner: string,
     public readonly confidenceLevel: number,

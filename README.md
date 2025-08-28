@@ -375,6 +375,34 @@ Content-Type: application/json
 | 편향 위험 | 높음 | 낮음 |
 | 추천 용도 | 일반적 결정 | 중요한 결정 |
 
+## 🚂 Railway 배포
+
+Railway 플랫폼에 배포하여 클라우드에서 실행할 수 있습니다.
+
+### 빠른 배포
+1. [Railway.app](https://railway.app)에서 GitHub 저장소 연결
+2. MongoDB 서비스 추가 (프로젝트 캔버스에서 + 버튼 → Database → MongoDB)
+3. 환경 변수 설정 (`.env.example` 파일 참조)
+4. 자동 배포 완료
+
+### 필수 환경 변수
+```bash
+NODE_ENV=production
+PORT=${{PORT}}
+MONGODB_URI=${{MongoDB.MONGO_URL}}
+USE_MONGODB=true
+ETHEREUM_RPC_URL=your_rpc_url
+ORACLE_CONTRACT_ADDRESS=your_contract_address
+ORACLE_PRIVATE_KEY_ENCRYPTED=your_encrypted_key
+ENCRYPTION_KEY=your_encryption_key
+OPENAI_API_KEY=your_openai_key
+JWT_SECRET=your_jwt_secret_min_32_chars
+ALLOWED_ORIGINS=https://your-app.railway.app
+```
+
+### 상세 가이드
+Railway 배포에 대한 자세한 내용은 [`RAILWAY_DEPLOYMENT.md`](./RAILWAY_DEPLOYMENT.md) 파일을 참고하세요.
+
 ## 라이선스
 
-ISC
+MIT

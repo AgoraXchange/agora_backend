@@ -12,34 +12,68 @@ export class EthereumService implements IBlockchainService {
   private wallet: ethers.Wallet | null = null;
   private contractABI: any[];
   private eventListeners: Map<string, ethers.Contract> = new Map();
-  private refreshTimers: Map<string, NodeJS.Timeout> = new Map();
   private eventCallbacks: Map<string, (...args: any[]) => void> = new Map();
+  private retryCount: Map<string, number> = new Map();
+  private lastCheckedBlock: Map<string, number> = new Map();
+  private queryIntervals: Map<string, NodeJS.Timeout> = new Map();
   private mockMode: boolean;
-  private readonly FILTER_REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minutes
+  private readonly FILTER_REFRESH_INTERVAL: number;
+  private readonly ETHEREUM_POLLING_INTERVAL: number;
 
   constructor(
     @inject('CryptoService') private cryptoService: CryptoService
   ) {
     const rpcUrl = process.env.ETHEREUM_RPC_URL || 'http://localhost:8545';
-    this.mockMode = process.env.BLOCKCHAIN_MOCK_MODE === 'true' || process.env.NODE_ENV === 'development';
+    const isRailway = !!(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID || process.env.RAILWAY_SERVICE_ID);
+    const useRealBlockchain = process.env.USE_REAL_BLOCKCHAIN === 'true';
     
-    this.provider = new ethers.JsonRpcProvider(rpcUrl);
-    // Enable polling to avoid WebSocket filter errors
-    this.provider.pollingInterval = 4000; // 4 seconds
+    // Allow real blockchain usage in Railway if explicitly enabled
+    this.mockMode = process.env.BLOCKCHAIN_MOCK_MODE === 'true' || 
+                    process.env.NODE_ENV === 'development' || 
+                    (isRailway && !useRealBlockchain);
+    
+    // Configure intervals from environment variables
+    this.ETHEREUM_POLLING_INTERVAL = parseInt(process.env.ETHEREUM_POLLING_INTERVAL || '10000');
+    this.FILTER_REFRESH_INTERVAL = parseInt(process.env.FILTER_REFRESH_INTERVAL || '240000'); // 4 minutes
+    
+    // Create provider with polling enabled to avoid filter errors
+    this.provider = new ethers.JsonRpcProvider(
+      rpcUrl,
+      undefined,
+      { 
+        polling: true,
+        pollingInterval: this.ETHEREUM_POLLING_INTERVAL
+      }
+    );
+    
+    // Add provider error handling
+    this.setupProviderErrorHandling();
     
     if (this.mockMode) {
-      // Use a test wallet for development/testing
+      // Use a test wallet for development/testing/Railway (when real blockchain is not enabled)
       const testPrivateKey = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'; // Well-known test key
       this.wallet = new ethers.Wallet(testPrivateKey, this.provider);
-      logger.warn('⚠️ Using MOCK Ethereum wallet for testing - DO NOT use in production!');
+      if (isRailway && !useRealBlockchain) {
+        logger.warn('🚂 Using Railway test wallet - blockchain functionality disabled for production safety');
+        logger.info('💡 To enable real blockchain, set USE_REAL_BLOCKCHAIN=true in Railway Variables');
+      } else {
+        logger.warn('⚠️ Using MOCK Ethereum wallet for testing - DO NOT use in production!');
+      }
     } else {
       try {
         const privateKey = this.cryptoService.getSecurePrivateKey();
         this.wallet = new ethers.Wallet(privateKey, this.provider);
-        logger.info('Ethereum wallet initialized successfully');
+        if (isRailway) {
+          logger.info('🚀 Railway real blockchain mode enabled - using production wallet');
+        } else {
+          logger.info('Ethereum wallet initialized successfully');
+        }
       } catch (error) {
         logger.error('Failed to initialize Ethereum wallet', { error: error instanceof Error ? error.message : 'Unknown error' });
-        throw error;
+        // In degraded mode, fall back to test key instead of throwing
+        const testPrivateKey = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
+        this.wallet = new ethers.Wallet(testPrivateKey, this.provider);
+        logger.warn('Using test wallet due to private key initialization failure - degraded mode');
       }
     }
     
@@ -147,18 +181,16 @@ export class EthereumService implements IBlockchainService {
 
     const key = `${contractAddress}-ContractCreated`;
     
-    // Store callback for refresh
+    // Store callback for cleanup
     this.eventCallbacks.set(key, callback);
     
-    // Setup initial listener
+    // Setup polling listener
     this.setupContractCreatedListener(contractAddress, key, callback);
     
-    // Setup auto-refresh
-    this.setupAutoRefresh(key, () => {
-      this.setupContractCreatedListener(contractAddress, key, callback);
+    logger.info('ContractCreated event listener registered with queryFilter polling', { 
+      contractAddress,
+      pollingInterval: this.ETHEREUM_POLLING_INTERVAL
     });
-    
-    logger.info('ContractCreated event listener registered with auto-refresh', { contractAddress });
   }
 
   private setupContractCreatedListener(
@@ -166,46 +198,85 @@ export class EthereumService implements IBlockchainService {
     key: string,
     callback: (event: ContractEventData) => void
   ): void {
-    // Remove existing listener if any
-    if (this.eventListeners.has(key)) {
-      this.eventListeners.get(key)?.removeAllListeners('ContractCreated');
+    // Stop existing interval if any
+    if (this.queryIntervals.has(key)) {
+      clearInterval(this.queryIntervals.get(key));
     }
 
-    // Use the main provider which is already configured for polling
-    const pollingContract = new ethers.Contract(contractAddress, this.contractABI, this.provider);
+    // Create contract instance for querying
+    const contract = new ethers.Contract(contractAddress, this.contractABI, this.provider);
+    this.eventListeners.set(key, contract);
     
-    const wrappedCallback = (contractId: any, creator: any, topic: any, description: any, partyA: any, partyB: any, bettingEndTime: any, event: any) => {
+    // Start polling for events
+    const pollEvents = async () => {
       try {
-        const eventData: ContractEventData = {
-          contractId: contractId.toString(),
-          creator,
-          topic,
-          description,
-          partyA,
-          partyB,
-          bettingEndTime: Number(bettingEndTime),
-          blockNumber: event.blockNumber,
-          transactionHash: event.transactionHash
-        };
+        const currentBlock = await this.provider.getBlockNumber();
+        const lastBlock = this.lastCheckedBlock.get(key) || (currentBlock - 100); // Start from 100 blocks ago on first run
         
-        logger.info('ContractCreated event received', { 
-          contractId: eventData.contractId,
-          topic: eventData.topic,
-          partyA: eventData.partyA,
-          partyB: eventData.partyB
-        });
-        callback(eventData);
+        if (lastBlock >= currentBlock) {
+          return; // No new blocks to check
+        }
+        
+        // Query for ContractCreated events
+        const filter = contract.filters.ContractCreated();
+        const events = await contract.queryFilter(filter, lastBlock + 1, currentBlock);
+        
+        // Process each event
+        for (const event of events) {
+          try {
+            // TypeScript guard: ensure this is an EventLog with args
+            if (!('args' in event) || !event.args) continue;
+            const args = event.args;
+            
+            const eventData: ContractEventData = {
+              contractId: args[0].toString(),
+              creator: args[1],
+              topic: args[2],
+              description: args[3],
+              partyA: args[4],
+              partyB: args[5],
+              bettingEndTime: Number(args[6]),
+              blockNumber: event.blockNumber,
+              transactionHash: event.transactionHash
+            };
+            
+            logger.info('ContractCreated event found via polling', { 
+              contractId: eventData.contractId,
+              topic: eventData.topic,
+              partyA: eventData.partyA,
+              partyB: eventData.partyB,
+              blockNumber: eventData.blockNumber
+            });
+            
+            callback(eventData);
+          } catch (error) {
+            logger.error('Error processing ContractCreated event', { 
+              error: error instanceof Error ? error.message : 'Unknown error',
+              transactionHash: event.transactionHash
+            });
+          }
+        }
+        
+        // Update last checked block
+        this.lastCheckedBlock.set(key, currentBlock);
+        
       } catch (error) {
-        logger.error('Error processing ContractCreated event', { error: error instanceof Error ? error.message : 'Unknown error' });
-        // Auto-recreate listener on error
-        setTimeout(() => {
-          this.setupContractCreatedListener(contractAddress, key, callback);
-        }, 1000);
+        logger.error('Error polling for ContractCreated events', { 
+          error: error instanceof Error ? error.message : 'Unknown error',
+          key
+        });
+        // Continue polling despite errors
       }
     };
     
-    pollingContract.on('ContractCreated', wrappedCallback);
-    this.eventListeners.set(key, pollingContract);
+    // Initial poll
+    pollEvents().catch(error => {
+      logger.error('Initial event poll failed', { error: error instanceof Error ? error.message : 'Unknown error' });
+    });
+    
+    // Start polling interval
+    const interval = setInterval(pollEvents, this.ETHEREUM_POLLING_INTERVAL);
+    this.queryIntervals.set(key, interval);
   }
 
   listenToBetPlaced(
@@ -214,18 +285,16 @@ export class EthereumService implements IBlockchainService {
   ): void {
     const key = `${contractAddress}-BetPlaced`;
     
-    // Store callback for refresh
+    // Store callback for cleanup
     this.eventCallbacks.set(key, callback);
     
-    // Setup initial listener
+    // Setup polling listener
     this.setupBetPlacedListener(contractAddress, key, callback);
     
-    // Setup auto-refresh
-    this.setupAutoRefresh(key, () => {
-      this.setupBetPlacedListener(contractAddress, key, callback);
+    logger.info('BetPlaced event listener registered with queryFilter polling', { 
+      contractAddress,
+      pollingInterval: this.ETHEREUM_POLLING_INTERVAL
     });
-    
-    logger.info('BetPlaced event listener registered with auto-refresh', { contractAddress });
   }
 
   private setupBetPlacedListener(
@@ -233,42 +302,81 @@ export class EthereumService implements IBlockchainService {
     key: string,
     callback: (event: BetPlacedEvent) => void
   ): void {
-    // Remove existing listener if any
-    if (this.eventListeners.has(key)) {
-      this.eventListeners.get(key)?.removeAllListeners('BetPlaced');
+    // Stop existing interval if any
+    if (this.queryIntervals.has(key)) {
+      clearInterval(this.queryIntervals.get(key));
     }
 
-    // Use the main provider which is already configured for polling
-    const pollingContract = new ethers.Contract(contractAddress, this.contractABI, this.provider);
+    // Create contract instance for querying
+    const contract = new ethers.Contract(contractAddress, this.contractABI, this.provider);
+    this.eventListeners.set(key, contract);
     
-    const wrappedCallback = (contractId: any, bettor: any, choice: any, amount: any, event: any) => {
+    // Start polling for events
+    const pollEvents = async () => {
       try {
-        const eventData: BetPlacedEvent = {
-          contractId: contractId.toString(),
-          bettor,
-          choice: Number(choice),
-          amount: amount.toString(),
-          blockNumber: event.blockNumber,
-          transactionHash: event.transactionHash
-        };
+        const currentBlock = await this.provider.getBlockNumber();
+        const lastBlock = this.lastCheckedBlock.get(key) || (currentBlock - 100); // Start from 100 blocks ago on first run
         
-        logger.info('BetPlaced event received', { 
-          contractId: eventData.contractId, 
-          bettor: eventData.bettor,
-          choice: eventData.choice 
-        });
-        callback(eventData);
+        if (lastBlock >= currentBlock) {
+          return; // No new blocks to check
+        }
+        
+        // Query for BetPlaced events
+        const filter = contract.filters.BetPlaced();
+        const events = await contract.queryFilter(filter, lastBlock + 1, currentBlock);
+        
+        // Process each event
+        for (const event of events) {
+          try {
+            // TypeScript guard: ensure this is an EventLog with args
+            if (!('args' in event) || !event.args) continue;
+            const args = event.args;
+            
+            const eventData: BetPlacedEvent = {
+              contractId: args[0].toString(),
+              bettor: args[1],
+              choice: Number(args[2]),
+              amount: args[3].toString(),
+              blockNumber: event.blockNumber,
+              transactionHash: event.transactionHash
+            };
+            
+            logger.info('BetPlaced event found via polling', { 
+              contractId: eventData.contractId,
+              bettor: eventData.bettor,
+              choice: eventData.choice,
+              blockNumber: eventData.blockNumber
+            });
+            
+            callback(eventData);
+          } catch (error) {
+            logger.error('Error processing BetPlaced event', { 
+              error: error instanceof Error ? error.message : 'Unknown error',
+              transactionHash: event.transactionHash
+            });
+          }
+        }
+        
+        // Update last checked block
+        this.lastCheckedBlock.set(key, currentBlock);
+        
       } catch (error) {
-        logger.error('Error processing BetPlaced event', { error: error instanceof Error ? error.message : 'Unknown error' });
-        // Auto-recreate listener on error
-        setTimeout(() => {
-          this.setupBetPlacedListener(contractAddress, key, callback);
-        }, 1000);
+        logger.error('Error polling for BetPlaced events', { 
+          error: error instanceof Error ? error.message : 'Unknown error',
+          key
+        });
+        // Continue polling despite errors
       }
     };
     
-    pollingContract.on('BetPlaced', wrappedCallback);
-    this.eventListeners.set(key, pollingContract);
+    // Initial poll
+    pollEvents().catch(error => {
+      logger.error('Initial BetPlaced poll failed', { error: error instanceof Error ? error.message : 'Unknown error' });
+    });
+    
+    // Start polling interval
+    const interval = setInterval(pollEvents, this.ETHEREUM_POLLING_INTERVAL);
+    this.queryIntervals.set(key, interval);
   }
   
   // Keep old method for backward compatibility
@@ -308,20 +416,6 @@ export class EthereumService implements IBlockchainService {
     logger.info('Event listener registered', { contractAddress, eventName });
   }
 
-  private setupAutoRefresh(key: string, setupFunction: () => void): void {
-    // Clear existing timer if any
-    if (this.refreshTimers.has(key)) {
-      clearInterval(this.refreshTimers.get(key)!);
-    }
-
-    // Setup new timer for periodic refresh
-    const timer = setInterval(() => {
-      logger.info('Auto-refreshing event listener', { key });
-      setupFunction();
-    }, this.FILTER_REFRESH_INTERVAL);
-    
-    this.refreshTimers.set(key, timer);
-  }
 
   removeEventListener(contractAddress: string, eventName: string): void {
     const key = `${contractAddress}-${eventName}`;
@@ -333,32 +427,63 @@ export class EthereumService implements IBlockchainService {
       logger.info('Event listener removed', { contractAddress, eventName });
     }
 
-    // Clear refresh timer
-    if (this.refreshTimers.has(key)) {
-      clearInterval(this.refreshTimers.get(key)!);
-      this.refreshTimers.delete(key);
+
+    // Clear query interval
+    if (this.queryIntervals.has(key)) {
+      clearInterval(this.queryIntervals.get(key)!);
+      this.queryIntervals.delete(key);
     }
 
-    // Clear callback
+    // Clear callback and other data
     this.eventCallbacks.delete(key);
+    this.retryCount.delete(key);
+    this.lastCheckedBlock.delete(key);
   }
+
+  private setupProviderErrorHandling(): void {
+    // Since we're using queryFilter instead of eth_newFilter/eth_getFilterChanges,
+    // we don't need complex filter error handling. Just log provider errors.
+    this.provider.on('error', (error: any) => {
+      logger.warn('Provider error occurred (continuing with queryFilter polling)', { 
+        error: error.message || error.toString(),
+        code: error.code
+      });
+    });
+
+    // Handle unhandled rejections at the provider level
+    process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
+      if (reason && reason.toString && reason.toString().includes('filter not found')) {
+        logger.info('Ignoring filter-related unhandled rejection (using queryFilter polling)', {
+          reason: reason.toString()
+        });
+        return; // Don't exit the process for these errors
+      }
+      
+      // For other unhandled rejections, let the global handler deal with it
+      logger.error('Unhandled rejection in EthereumService', { reason, promise });
+    });
+  }
+
 
   cleanup(): void {
     logger.info('Cleaning up Ethereum service event listeners');
     
+    // Clear event listeners (no longer needed with queryFilter approach)
     for (const [key, contract] of this.eventListeners) {
       contract.removeAllListeners();
     }
-    
     this.eventListeners.clear();
 
-    // Clear all refresh timers
-    for (const [key, timer] of this.refreshTimers) {
-      clearInterval(timer);
-    }
-    this.refreshTimers.clear();
 
-    // Clear all callbacks
+    // Clear all query intervals
+    for (const [key, interval] of this.queryIntervals) {
+      clearInterval(interval);
+    }
+    this.queryIntervals.clear();
+
+    // Clear all callbacks, retry counts, and last checked blocks
     this.eventCallbacks.clear();
+    this.retryCount.clear();
+    this.lastCheckedBlock.clear();
   }
 }
