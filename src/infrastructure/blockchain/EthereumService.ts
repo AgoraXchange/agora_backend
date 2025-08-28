@@ -12,7 +12,10 @@ export class EthereumService implements IBlockchainService {
   private wallet: ethers.Wallet | null = null;
   private contractABI: any[];
   private eventListeners: Map<string, ethers.Contract> = new Map();
+  private refreshTimers: Map<string, NodeJS.Timeout> = new Map();
+  private eventCallbacks: Map<string, (...args: any[]) => void> = new Map();
   private mockMode: boolean;
+  private readonly FILTER_REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minutes
 
   constructor(
     @inject('CryptoService') private cryptoService: CryptoService
@@ -21,6 +24,8 @@ export class EthereumService implements IBlockchainService {
     this.mockMode = process.env.BLOCKCHAIN_MOCK_MODE === 'true' || process.env.NODE_ENV === 'development';
     
     this.provider = new ethers.JsonRpcProvider(rpcUrl);
+    // Enable polling to avoid WebSocket filter errors
+    this.provider.pollingInterval = 4000; // 4 seconds
     
     if (this.mockMode) {
       // Use a test wallet for development/testing
@@ -33,7 +38,7 @@ export class EthereumService implements IBlockchainService {
         this.wallet = new ethers.Wallet(privateKey, this.provider);
         logger.info('Ethereum wallet initialized successfully');
       } catch (error) {
-        logger.error('Failed to initialize Ethereum wallet', { error: error.message });
+        logger.error('Failed to initialize Ethereum wallet', { error: error instanceof Error ? error.message : 'Unknown error' });
         throw error;
       }
     }
@@ -44,7 +49,7 @@ export class EthereumService implements IBlockchainService {
       "function closeBetting(uint256 _contractId) external",
       "function placeBet(uint256 _contractId, uint8 _choice) external payable",
       "function getUserBets(uint256 _contractId, address _user) external view returns (uint256[] memory amounts, uint8[] memory choices, bool[] memory claimed)",
-      "event ContractCreated(uint256 indexed contractId, address indexed creator, string partyA, string partyB, uint256 bettingEndTime)",
+      "event ContractCreated(uint256 indexed contractId, address indexed creator, string topic, string description, string partyA, string partyB, uint256 bettingEndTime)",
       "event BetPlaced(uint256 indexed contractId, address indexed bettor, uint8 choice, uint256 amount)",
       "event WinnerDeclared(uint256 indexed contractId, uint8 winner)",
       "event RewardsDistributed(uint256 indexed contractId, uint256 partyReward, uint256 totalDistributed)",
@@ -57,7 +62,7 @@ export class EthereumService implements IBlockchainService {
     winner: Choice
   ): Promise<string> {
     if (this.mockMode) {
-      logger.info('🎭 MOCK: Simulating blockchain submission', { contractAddress, winnerId });
+      logger.info('🎭 MOCK: Simulating blockchain submission', { contractId, winner });
       // Simulate successful transaction
       return `0xmock${Date.now().toString(16)}`;
     }
@@ -85,7 +90,7 @@ export class EthereumService implements IBlockchainService {
       return receipt.hash;
     } catch (error) {
       logger.error('Blockchain declareWinner error', { 
-        error: error.message, 
+        error: error instanceof Error ? error.message : 'Unknown error', 
         contractId, 
         winner 
       });
@@ -140,65 +145,130 @@ export class EthereumService implements IBlockchainService {
       return;
     }
 
-    const contract = new ethers.Contract(contractAddress, this.contractABI, this.provider);
     const key = `${contractAddress}-ContractCreated`;
     
-    if (this.eventListeners.has(key)) {
-      logger.warn('ContractCreated event listener already exists, removing old listener');
-      this.removeEventListener(contractAddress, 'ContractCreated');
-    }
+    // Store callback for refresh
+    this.eventCallbacks.set(key, callback);
     
-    contract.on('ContractCreated', (contractId, creator, partyA, partyB, bettingEndTime, event) => {
-      const eventData: ContractEventData = {
-        contractId: contractId.toString(),
-        creator,
-        partyA,  // Simple string
-        partyB,  // Simple string
-        bettingEndTime: Number(bettingEndTime),
-        blockNumber: event.blockNumber,
-        transactionHash: event.transactionHash
-      };
-      
-      logger.info('ContractCreated event received', { contractId: eventData.contractId });
-      callback(eventData);
+    // Setup initial listener
+    this.setupContractCreatedListener(contractAddress, key, callback);
+    
+    // Setup auto-refresh
+    this.setupAutoRefresh(key, () => {
+      this.setupContractCreatedListener(contractAddress, key, callback);
     });
     
-    this.eventListeners.set(key, contract);
-    logger.info('ContractCreated event listener registered', { contractAddress });
+    logger.info('ContractCreated event listener registered with auto-refresh', { contractAddress });
+  }
+
+  private setupContractCreatedListener(
+    contractAddress: string,
+    key: string,
+    callback: (event: ContractEventData) => void
+  ): void {
+    // Remove existing listener if any
+    if (this.eventListeners.has(key)) {
+      this.eventListeners.get(key)?.removeAllListeners('ContractCreated');
+    }
+
+    // Use the main provider which is already configured for polling
+    const pollingContract = new ethers.Contract(contractAddress, this.contractABI, this.provider);
+    
+    const wrappedCallback = (contractId: any, creator: any, topic: any, description: any, partyA: any, partyB: any, bettingEndTime: any, event: any) => {
+      try {
+        const eventData: ContractEventData = {
+          contractId: contractId.toString(),
+          creator,
+          topic,
+          description,
+          partyA,
+          partyB,
+          bettingEndTime: Number(bettingEndTime),
+          blockNumber: event.blockNumber,
+          transactionHash: event.transactionHash
+        };
+        
+        logger.info('ContractCreated event received', { 
+          contractId: eventData.contractId,
+          topic: eventData.topic,
+          partyA: eventData.partyA,
+          partyB: eventData.partyB
+        });
+        callback(eventData);
+      } catch (error) {
+        logger.error('Error processing ContractCreated event', { error: error instanceof Error ? error.message : 'Unknown error' });
+        // Auto-recreate listener on error
+        setTimeout(() => {
+          this.setupContractCreatedListener(contractAddress, key, callback);
+        }, 1000);
+      }
+    };
+    
+    pollingContract.on('ContractCreated', wrappedCallback);
+    this.eventListeners.set(key, pollingContract);
   }
 
   listenToBetPlaced(
     contractAddress: string,
     callback: (event: BetPlacedEvent) => void
   ): void {
-    const contract = new ethers.Contract(contractAddress, this.contractABI, this.provider);
     const key = `${contractAddress}-BetPlaced`;
     
-    if (this.eventListeners.has(key)) {
-      logger.warn('BetPlaced event listener already exists, removing old listener', { contractAddress });
-      this.removeEventListener(contractAddress, 'BetPlaced');
-    }
+    // Store callback for refresh
+    this.eventCallbacks.set(key, callback);
     
-    contract.on('BetPlaced', (contractId, bettor, choice, amount, event) => {
-      const eventData: BetPlacedEvent = {
-        contractId: contractId.toString(),
-        bettor,
-        choice: Number(choice),
-        amount: amount.toString(),
-        blockNumber: event.blockNumber,
-        transactionHash: event.transactionHash
-      };
-      
-      logger.info('BetPlaced event received', { 
-        contractId: eventData.contractId, 
-        bettor: eventData.bettor,
-        choice: eventData.choice 
-      });
-      callback(eventData);
+    // Setup initial listener
+    this.setupBetPlacedListener(contractAddress, key, callback);
+    
+    // Setup auto-refresh
+    this.setupAutoRefresh(key, () => {
+      this.setupBetPlacedListener(contractAddress, key, callback);
     });
     
-    this.eventListeners.set(key, contract);
-    logger.info('BetPlaced event listener registered', { contractAddress });
+    logger.info('BetPlaced event listener registered with auto-refresh', { contractAddress });
+  }
+
+  private setupBetPlacedListener(
+    contractAddress: string,
+    key: string,
+    callback: (event: BetPlacedEvent) => void
+  ): void {
+    // Remove existing listener if any
+    if (this.eventListeners.has(key)) {
+      this.eventListeners.get(key)?.removeAllListeners('BetPlaced');
+    }
+
+    // Use the main provider which is already configured for polling
+    const pollingContract = new ethers.Contract(contractAddress, this.contractABI, this.provider);
+    
+    const wrappedCallback = (contractId: any, bettor: any, choice: any, amount: any, event: any) => {
+      try {
+        const eventData: BetPlacedEvent = {
+          contractId: contractId.toString(),
+          bettor,
+          choice: Number(choice),
+          amount: amount.toString(),
+          blockNumber: event.blockNumber,
+          transactionHash: event.transactionHash
+        };
+        
+        logger.info('BetPlaced event received', { 
+          contractId: eventData.contractId, 
+          bettor: eventData.bettor,
+          choice: eventData.choice 
+        });
+        callback(eventData);
+      } catch (error) {
+        logger.error('Error processing BetPlaced event', { error: error instanceof Error ? error.message : 'Unknown error' });
+        // Auto-recreate listener on error
+        setTimeout(() => {
+          this.setupBetPlacedListener(contractAddress, key, callback);
+        }, 1000);
+      }
+    };
+    
+    pollingContract.on('BetPlaced', wrappedCallback);
+    this.eventListeners.set(key, pollingContract);
   }
   
   // Keep old method for backward compatibility
@@ -238,6 +308,21 @@ export class EthereumService implements IBlockchainService {
     logger.info('Event listener registered', { contractAddress, eventName });
   }
 
+  private setupAutoRefresh(key: string, setupFunction: () => void): void {
+    // Clear existing timer if any
+    if (this.refreshTimers.has(key)) {
+      clearInterval(this.refreshTimers.get(key)!);
+    }
+
+    // Setup new timer for periodic refresh
+    const timer = setInterval(() => {
+      logger.info('Auto-refreshing event listener', { key });
+      setupFunction();
+    }, this.FILTER_REFRESH_INTERVAL);
+    
+    this.refreshTimers.set(key, timer);
+  }
+
   removeEventListener(contractAddress: string, eventName: string): void {
     const key = `${contractAddress}-${eventName}`;
     const contract = this.eventListeners.get(key);
@@ -247,6 +332,15 @@ export class EthereumService implements IBlockchainService {
       this.eventListeners.delete(key);
       logger.info('Event listener removed', { contractAddress, eventName });
     }
+
+    // Clear refresh timer
+    if (this.refreshTimers.has(key)) {
+      clearInterval(this.refreshTimers.get(key)!);
+      this.refreshTimers.delete(key);
+    }
+
+    // Clear callback
+    this.eventCallbacks.delete(key);
   }
 
   cleanup(): void {
@@ -257,5 +351,14 @@ export class EthereumService implements IBlockchainService {
     }
     
     this.eventListeners.clear();
+
+    // Clear all refresh timers
+    for (const [key, timer] of this.refreshTimers) {
+      clearInterval(timer);
+    }
+    this.refreshTimers.clear();
+
+    // Clear all callbacks
+    this.eventCallbacks.clear();
   }
 }

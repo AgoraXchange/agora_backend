@@ -1,13 +1,18 @@
 import CryptoJS from 'crypto-js';
 import * as readline from 'readline';
-import { promisify } from 'util';
 
 const rl = readline.createInterface({
   input: process.stdin,
   output: process.stdout
 });
 
-const question = promisify(rl.question).bind(rl);
+const question = (prompt: string): Promise<string> => {
+  return new Promise((resolve) => {
+    rl.question(prompt, (answer) => {
+      resolve(answer);
+    });
+  });
+};
 
 async function encryptPrivateKey() {
   try {
@@ -29,7 +34,7 @@ async function encryptPrivateKey() {
     console.log('Make sure to keep your ENCRYPTION_KEY secure!');
     
   } catch (error) {
-    console.error('Error:', error.message);
+    console.error('Error:', error instanceof Error ? error.message : String(error));
   } finally {
     rl.close();
   }

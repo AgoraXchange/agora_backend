@@ -19,7 +19,7 @@ export class CryptoService {
       const encrypted = CryptoJS.AES.encrypt(text, this.encryptionKey).toString();
       return encrypted;
     } catch (error) {
-      logger.error('Encryption failed', { error: error.message });
+      logger.error('Encryption failed', { error: error instanceof Error ? error.message : 'Unknown error' });
       throw new Error('Failed to encrypt data');
     }
   }
@@ -29,7 +29,7 @@ export class CryptoService {
       const decrypted = CryptoJS.AES.decrypt(encryptedText, this.encryptionKey);
       return decrypted.toString(CryptoJS.enc.Utf8);
     } catch (error) {
-      logger.error('Decryption failed', { error: error.message });
+      logger.error('Decryption failed', { error: error instanceof Error ? error.message : 'Unknown error' });
       throw new Error('Failed to decrypt data');
     }
   }

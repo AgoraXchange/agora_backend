@@ -28,7 +28,7 @@ export class OpenAIService implements IAIService {
       const analysis = this.parseResponse(response);
       
       // For judge comparisons, the response is already structured judgment data
-      if (input.context?.prompt) {
+      if (input.additionalContext?.prompt) {
         // This is a judge comparison, return the full judgment data
         const winnerId = this.determineWinner(input, analysis);
         
@@ -74,9 +74,9 @@ export class OpenAIService implements IAIService {
   }
 
   private buildPrompt(input: AIAnalysisInput): string {
-    // Check if this is a judge comparison (has prompt in context)
-    if (input.context?.prompt) {
-      return input.context.prompt;
+    // Check if this is a judge comparison (has prompt in additionalContext)
+    if (input.additionalContext?.prompt) {
+      return input.additionalContext.prompt;
     }
     
     // Default prompt for regular analysis
