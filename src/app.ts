@@ -5,7 +5,7 @@ import dotenv from 'dotenv';
 import { createOracleRoutes } from './interfaces/routes/oracleRoutes';
 import { createAuthRoutes } from './interfaces/routes/authRoutes';
 import { createDeliberationRoutes } from './interfaces/routes/deliberationRoutes';
-import { errorHandler, notFoundHandler } from './interfaces/middleware/errorMiddleware';
+import { errorHandler, notFoundHandler, asyncHandler } from './interfaces/middleware/errorMiddleware';
 import { apiRateLimiter } from './interfaces/middleware/rateLimitMiddleware';
 import { logger } from './infrastructure/logging/Logger';
 import { container } from './container';
@@ -13,6 +13,14 @@ import { MongoDBConnection } from './infrastructure/database/MongoDBConnection';
 import { readinessTracker } from './infrastructure/readiness/ReadinessTracker';
 
 dotenv.config();
+
+// Pre-load package.json version to avoid require() during health check
+let packageVersion: string = '1.0.0';
+try {
+  packageVersion = require('../package.json').version || '1.0.0';
+} catch (error) {
+  logger.warn('Failed to load package.json version, using default', { error: error instanceof Error ? error.message : 'Unknown error' });
+}
 
 export function createApp() {
   const app = express();
@@ -63,27 +71,29 @@ export function createApp() {
     next();
   });
 
-  // Enhanced health check route with readiness tracking
-  app.get('/health', async (req, res) => {
+  // Enhanced health check route with readiness tracking and comprehensive error handling
+  app.get('/health', asyncHandler(async (req, res) => {
     const startTime = Date.now();
-    const readinessStatus = readinessTracker.getReadinessStatus();
-    const isReady = readinessStatus.overall;
     
-    const healthStatus: any = {
-      status: isReady ? 'ready' : 'starting',
-      timestamp: new Date().toISOString(),
-      environment: process.env.NODE_ENV || 'development',
-      uptime: process.uptime(),
-      version: require('../package.json').version || '1.0.0',
-      readiness: {
-        ready: isReady,
-        components: readinessStatus.components,
-        notReadyComponents: readinessTracker.getNotReadyComponents()
-      },
-      services: {}
-    };
-
     try {
+      // All potentially failing operations are now inside try-catch
+      const readinessStatus = readinessTracker.getReadinessStatus();
+      const isReady = readinessStatus.overall;
+      
+      const healthStatus: any = {
+        status: isReady ? 'ready' : 'starting',
+        timestamp: new Date().toISOString(),
+        environment: process.env.NODE_ENV || 'development',
+        uptime: process.uptime(),
+        version: packageVersion, // Use pre-loaded version instead of require()
+        readiness: {
+          ready: isReady,
+          components: readinessStatus.components,
+          notReadyComponents: readinessTracker.getNotReadyComponents()
+        },
+        services: {}
+      };
+
       // Check MongoDB connection if enabled
       if (process.env.USE_MONGODB === 'true') {
         try {
@@ -139,7 +149,14 @@ export function createApp() {
       }
       
       res.status(httpStatus).json(healthStatus);
+      
     } catch (error) {
+      // Comprehensive error handling for any failure in the health check
+      logger.error('Health check failed', { 
+        error: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined
+      });
+      
       res.status(503).json({
         status: 'error',
         timestamp: new Date().toISOString(),
@@ -147,12 +164,13 @@ export function createApp() {
         responseTime: `${Date.now() - startTime}ms`,
         readiness: {
           ready: false,
-          components: readinessStatus.components,
-          notReadyComponents: readinessTracker.getNotReadyComponents()
+          // Safe fallback values in case readinessTracker calls fail
+          components: {},
+          notReadyComponents: []
         }
       });
     }
-  });
+  }));
 
   // API routes
   app.use('/api/auth', createAuthRoutes());
