@@ -9,13 +9,21 @@ export class GPT5Proposer extends BaseProposer {
   readonly agentName = 'GPT-5 Analyst';
   readonly agentType = 'gpt5';
   
-  private openai: OpenAI;
+  private openai?: OpenAI;
 
   constructor() {
     super();
-    this.openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY
-    });
+  }
+  
+  private getOpenAI(): OpenAI {
+    if (!this.openai) {
+      const apiKey = process.env.OPENAI_API_KEY;
+      if (!apiKey) {
+        throw new Error('OpenAI API key is required for GPT-5 Proposer');
+      }
+      this.openai = new OpenAI({ apiKey });
+    }
+    return this.openai;
   }
 
   protected getDefaultConfig(): ProposerConfig {
@@ -76,7 +84,7 @@ Determine winner. Return JSON.`
         maxTokens: this.config.maxTokens 
       });
 
-      const completion = await this.openai.chat.completions.create({
+      const completion = await this.getOpenAI().chat.completions.create({
         model: this.getModelName(),
         messages: [
           {

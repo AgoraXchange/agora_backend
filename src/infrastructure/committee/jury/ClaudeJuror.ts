@@ -33,7 +33,7 @@ export class ClaudeJuror extends BaseJuror {
   
   constructor() {
     super();
-    const apiKey = process.env.CLAUDE_API_KEY;
+    const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
       throw new Error('Claude API key required for Claude Juror');
     }

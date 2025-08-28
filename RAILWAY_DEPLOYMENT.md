@@ -75,8 +75,8 @@ ENCRYPTION_KEY=your_encryption_key
 
 # AI 서비스 API 키
 OPENAI_API_KEY=your_openai_api_key
-CLAUDE_API_KEY=your_claude_api_key
-GOOGLE_AI_API_KEY=your_gemini_api_key
+ANTHROPIC_API_KEY=your_claude_api_key
+GOOGLE_API_KEY=your_gemini_api_key
 
 # JWT 및 보안 (최소 32자)
 JWT_SECRET=your_very_long_jwt_secret_at_least_32_characters

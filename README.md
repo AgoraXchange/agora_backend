@@ -278,13 +278,13 @@ COMMITTEE_MAX_PROPOSALS_PER_AGENT=2
 
 # AI 서비스 설정 (실제 API 키 필요)
 OPENAI_API_KEY=your_actual_openai_key
-CLAUDE_API_KEY=your_claude_key  
-GOOGLE_AI_API_KEY=your_gemini_key
+ANTHROPIC_API_KEY=your_claude_key  
+GOOGLE_API_KEY=your_gemini_key
 
 # 테스트용 (Mock 응답 사용)
 OPENAI_FALLBACK_TO_MOCK=true
-CLAUDE_API_KEY=mock
-GOOGLE_AI_API_KEY=mock
+ANTHROPIC_API_KEY=mock
+GOOGLE_API_KEY=mock
 ```
 
 #### API 사용 예시

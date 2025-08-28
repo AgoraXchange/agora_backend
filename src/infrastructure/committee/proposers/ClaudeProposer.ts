@@ -54,7 +54,7 @@ Analyze ethically. Return JSON.`
     rawResponse: any;
   }> {
     // Check if we should use mock mode
-    const apiKey = process.env.CLAUDE_API_KEY;
+    const apiKey = process.env.ANTHROPIC_API_KEY;
     
     if (!apiKey || apiKey === 'mock' || apiKey.includes('mock_claude')) {
       logger.debug('Using mock Claude response (mock mode enabled)');
@@ -69,7 +69,7 @@ Analyze ethically. Return JSON.`
       });
 
       // Implement real Claude API call
-      const anthropic = new Anthropic({ apiKey: process.env.CLAUDE_API_KEY });
+      const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
       
       const message = await anthropic.messages.create({
         model: this.getModelName(),

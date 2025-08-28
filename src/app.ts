@@ -102,12 +102,22 @@ export function createApp() {
         healthStatus.services.mongodb = { status: 'disabled' };
       }
 
-      // Check if container dependency is available
-      try {
-        container.get('IBlockchainService');
-        healthStatus.services.blockchain = { status: 'available' };
-      } catch (error) {
-        healthStatus.services.blockchain = { status: 'unavailable' };
+      // Check if container dependency is available (cached after first check)
+      if (!app.locals.blockchainServiceStatus) {
+        try {
+          container.get('IBlockchainService');
+          app.locals.blockchainServiceStatus = { status: 'available', checkedAt: Date.now() };
+        } catch (error) {
+          app.locals.blockchainServiceStatus = { status: 'unavailable', error: error instanceof Error ? error.message : 'Unknown error', checkedAt: Date.now() };
+        }
+      }
+      
+      healthStatus.services.blockchain = { 
+        status: app.locals.blockchainServiceStatus.status,
+        lastChecked: new Date(app.locals.blockchainServiceStatus.checkedAt).toISOString()
+      };
+      
+      if (app.locals.blockchainServiceStatus.status === 'unavailable') {
         if (healthStatus.status !== 'degraded') {
           healthStatus.status = 'degraded';
         }

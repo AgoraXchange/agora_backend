@@ -8,8 +8,8 @@ import { Party } from '../../domain/entities/Party';
 
 // Mock environment variables for testing
 process.env.OPENAI_FALLBACK_TO_MOCK = 'true';
-process.env.CLAUDE_API_KEY = 'mock';
-process.env.GOOGLE_AI_API_KEY = 'mock';
+process.env.ANTHROPIC_API_KEY = 'mock';
+process.env.GOOGLE_API_KEY = 'mock';
 process.env.USE_COMMITTEE = 'true';
 
 describe('Committee System Integration', () => {

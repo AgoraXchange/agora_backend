@@ -5,7 +5,7 @@ import { MongoDBConnection } from './infrastructure/database/MongoDBConnection';
 import { EthereumService } from './infrastructure/blockchain/EthereumService';
 import { GracefulShutdown } from './infrastructure/GracefulShutdown';
 import { logger } from './infrastructure/logging/Logger';
-import { validateWithGracefulDegradation, getEnvDefaults } from './config/validateEnv';
+import { validateWithGracefulDegradation, getEnvDefaults, isRailwayEnvironment, getEnvVar } from './config/validateEnv';
 import { readinessTracker } from './infrastructure/readiness/ReadinessTracker';
 
 // Validate environment before starting
@@ -146,6 +146,18 @@ async function startServer() {
 
 function startContractMonitoring() {
   const monitorUseCase = container.get<MonitorContractsUseCase>('MonitorContractsUseCase');
+  
+  // Log Railway environment configuration
+  if (isRailwayEnvironment()) {
+    logger.info('🚂 Railway environment detected');
+    logger.info('Contract monitoring configuration:', {
+      contractAddress: getEnvVar(['MAIN_CONTRACT_ADDRESS', 'ORACLE_CONTRACT_ADDRESS']) ? '✅ Set' : '❌ Missing',
+      rpcUrl: process.env.ETHEREUM_RPC_URL ? '✅ Set' : '❌ Missing',
+      useRealBlockchain: process.env.USE_REAL_BLOCKCHAIN === 'true' ? '✅ Enabled' : '⚠️ Disabled (mock mode)',
+      pollingInterval: process.env.ETHEREUM_POLLING_INTERVAL || 10000,
+      monitoringInterval: MONITORING_INTERVAL
+    });
+  }
 
   logger.info(`Starting contract monitoring with interval: ${MONITORING_INTERVAL}ms`);
 

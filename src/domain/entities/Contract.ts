@@ -9,6 +9,19 @@ export enum ContractStatus {
   DISTRIBUTED = 'DISTRIBUTED'
 }
 
+/**
+ * Maps smart contract status (0-3) to ContractStatus enum
+ */
+export function mapChainStatusToContractStatus(chainStatus: number): ContractStatus {
+  switch (chainStatus) {
+    case 0: return ContractStatus.BETTING_OPEN;     // Open
+    case 1: return ContractStatus.BETTING_CLOSED;   // Closed
+    case 2: return ContractStatus.DECIDED;          // Winner Declared
+    case 3: return ContractStatus.DISTRIBUTED;      // Distributed
+    default: return ContractStatus.CREATED;         // Fallback for unknown status
+  }
+}
+
 export class Contract {
   constructor(
     public readonly id: string,

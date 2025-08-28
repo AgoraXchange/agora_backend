@@ -29,7 +29,7 @@ Determine winner. Return JSON.`
   }
 
   protected getModelName(): string {
-    return process.env.GEMINI_MODEL || 'gemini-pro';
+    return process.env.GOOGLE_MODEL || 'gemini-pro';
   }
 
   protected async callAIModel(prompt: string, temperature: number): Promise<{
@@ -42,7 +42,7 @@ Determine winner. Return JSON.`
     rawResponse: any;
   }> {
     // Check if we should use mock mode
-    const apiKey = process.env.GOOGLE_AI_API_KEY;
+    const apiKey = process.env.GOOGLE_API_KEY;
     
     if (!apiKey || apiKey === 'mock' || apiKey.includes('mock_google')) {
       logger.debug('Using mock Gemini response (mock mode enabled)');
@@ -57,7 +57,7 @@ Determine winner. Return JSON.`
       });
 
       // Implement real Gemini API call
-      const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY!);
+      const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY!);
       const model = genAI.getGenerativeModel({ model: this.getModelName() });
       
       // Combine system prompt and user prompt

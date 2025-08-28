@@ -2,7 +2,7 @@ import { injectable, inject } from 'inversify';
 import { IContractRepository } from '../../domain/repositories/IContractRepository';
 import { IBlockchainService } from '../../domain/services/IBlockchainService';
 import { DecideWinnerUseCase } from './DecideWinnerUseCase';
-import { Contract, ContractStatus } from '../../domain/entities/Contract';
+import { Contract, ContractStatus, mapChainStatusToContractStatus } from '../../domain/entities/Contract';
 import { Party } from '../../domain/entities/Party';
 import { ContractEventData, BetPlacedEvent } from '../../domain/entities/BettingStats';
 import { logger } from '../../infrastructure/logging/Logger';
@@ -24,28 +24,46 @@ export class MonitorContractsUseCase {
       this.isEventListenerInitialized = true;
     }
 
-    // Monitor existing contracts ready for decision
-    const contractsReadyForDecision = await this.contractRepository.findContractsReadyForDecision();
-    
-    for (const contract of contractsReadyForDecision) {
-      logger.info(`Processing contract ${contract.id} for winner decision`);
+    logger.debug('Running monitoring cycle...');
+
+    try {
+      // 1. Update contract statuses from blockchain
+      await this.updateContractStatuses();
+
+      // 2. Monitor existing contracts ready for decision
+      const contractsReadyForDecision = await this.contractRepository.findContractsReadyForDecision();
       
-      const result = await this.decideWinnerUseCase.execute({
-        contractId: contract.id
-      });
-      
-      if (result.success) {
-        logger.info(`Winner decided for contract ${contract.id}: ${result.winnerId}`, {
-          contractId: contract.id,
-          winnerId: result.winnerId,
-          transactionHash: result.transactionHash
-        });
-      } else {
-        logger.error(`Failed to decide winner for contract ${contract.id}: ${result.error}`, {
-          contractId: contract.id,
-          error: result.error
-        });
+      if (contractsReadyForDecision.length > 0) {
+        logger.info(`Found ${contractsReadyForDecision.length} contracts ready for decision`);
       }
+      
+      for (const contract of contractsReadyForDecision) {
+        logger.info(`Processing contract ${contract.id} for winner decision`);
+        
+        const result = await this.decideWinnerUseCase.execute({
+          contractId: contract.id
+        });
+        
+        if (result.success) {
+          logger.info(`Winner decided for contract ${contract.id}: ${result.winnerId}`, {
+            contractId: contract.id,
+            winnerId: result.winnerId,
+            transactionHash: result.transactionHash
+          });
+        } else {
+          logger.error(`Failed to decide winner for contract ${contract.id}: ${result.error}`, {
+            contractId: contract.id,
+            error: result.error
+          });
+        }
+      }
+
+      logger.debug('Monitoring cycle completed');
+
+    } catch (error) {
+      logger.error('Error during monitoring cycle', {
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
     }
   }
 
@@ -123,6 +141,75 @@ export class MonitorContractsUseCase {
     } catch (error) {
       logger.error('Error processing ContractCreated event', {
         contractId: event.contractId,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  }
+
+  /**
+   * Updates contract statuses by querying the blockchain
+   */
+  private async updateContractStatuses(): Promise<void> {
+    try {
+      const contracts = await this.contractRepository.findAll();
+      
+      if (contracts.length === 0) {
+        logger.debug('No contracts to update');
+        return;
+      }
+
+      logger.debug(`Checking status of ${contracts.length} contracts`);
+
+      let updatedCount = 0;
+      for (const contract of contracts) {
+        try {
+          // Skip contracts that are already decided or distributed
+          if (contract.status === ContractStatus.DECIDED || contract.status === ContractStatus.DISTRIBUTED) {
+            continue;
+          }
+
+          // Get current status from blockchain
+          const chainData = await this.blockchainService.getContract(contract.id);
+          const newStatus = mapChainStatusToContractStatus(chainData.status);
+
+          // Check if status has changed
+          if (contract.status !== newStatus) {
+            const oldStatus = contract.status;
+            contract.status = newStatus;
+            
+            await this.contractRepository.update(contract);
+            updatedCount++;
+
+            logger.info(`Contract ${contract.id} status updated`, {
+              contractId: contract.id,
+              oldStatus,
+              newStatus,
+              chainStatus: chainData.status
+            });
+
+            // If betting just closed, trigger winner decision in next cycle
+            if (newStatus === ContractStatus.BETTING_CLOSED) {
+              logger.info(`Contract ${contract.id} betting closed - will be processed for winner decision`);
+            }
+          }
+
+        } catch (error) {
+          // Log individual contract errors but continue with others
+          logger.warn(`Failed to update status for contract ${contract.id}`, {
+            contractId: contract.id,
+            error: error instanceof Error ? error.message : 'Unknown error'
+          });
+        }
+      }
+
+      if (updatedCount > 0) {
+        logger.info(`Updated status for ${updatedCount} contracts`);
+      } else {
+        logger.debug('No contract status updates needed');
+      }
+
+    } catch (error) {
+      logger.error('Error updating contract statuses', {
         error: error instanceof Error ? error.message : 'Unknown error'
       });
     }

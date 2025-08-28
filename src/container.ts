@@ -44,11 +44,11 @@ if (useMongoDB) {
   container.bind<IOracleDecisionRepository>('IOracleDecisionRepository').to(InMemoryOracleDecisionRepository);
 }
 
-// Services
+// Services - Critical services as singletons for performance and Railway stability
 container.bind<IAIService>('IAIService').to(OpenAIService);
-container.bind<IBlockchainService>('IBlockchainService').to(EthereumService);
+container.bind<IBlockchainService>('IBlockchainService').to(EthereumService).inSingletonScope();
 container.bind<JwtService>('JwtService').to(JwtService);
-container.bind<CryptoService>('CryptoService').to(CryptoService);
+container.bind<CryptoService>('CryptoService').to(CryptoService).inSingletonScope();
 
 // Committee System Services
 container.bind<ICommitteeService>('ICommitteeService').to(CommitteeOrchestrator);
@@ -69,15 +69,18 @@ container.bind<IAgentService>('GeminiProposer').to(GeminiProposer);
 container.bind<IAgentService[]>('ProposerAgents').toDynamicValue((context) => {
   const enabledProposers: IAgentService[] = [];
   
-  if (process.env.PROPOSER_GPT5_ENABLED !== 'false') {
+  // Only create GPT5Proposer if API key is available
+  if (process.env.PROPOSER_GPT5_ENABLED !== 'false' && process.env.OPENAI_API_KEY) {
     enabledProposers.push(context.container.get<IAgentService>('GPT5Proposer'));
   }
   
-  if (process.env.PROPOSER_CLAUDE_ENABLED !== 'false') {
+  // Only create ClaudeProposer if API key is available
+  if (process.env.PROPOSER_CLAUDE_ENABLED !== 'false' && process.env.ANTHROPIC_API_KEY) {
     enabledProposers.push(context.container.get<IAgentService>('ClaudeProposer'));
   }
   
-  if (process.env.PROPOSER_GEMINI_ENABLED !== 'false') {
+  // Only create GeminiProposer if API key is available
+  if (process.env.PROPOSER_GEMINI_ENABLED !== 'false' && process.env.GOOGLE_API_KEY) {
     enabledProposers.push(context.container.get<IAgentService>('GeminiProposer'));
   }
   

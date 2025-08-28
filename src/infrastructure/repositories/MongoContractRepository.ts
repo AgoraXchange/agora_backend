@@ -78,6 +78,11 @@ export class MongoContractRepository implements IContractRepository {
     return docs.map(doc => this.documentToEntity(doc));
   }
 
+  async findAll(): Promise<Contract[]> {
+    const docs = await this.collection.find({}).toArray();
+    return docs.map(doc => this.documentToEntity(doc));
+  }
+
   async save(contract: Contract): Promise<void> {
     const doc = this.entityToDocument(contract);
     await this.collection.insertOne(doc);

@@ -16,7 +16,7 @@ export class ClaudeInvestigator implements IInvestigatorService {
   private readonly model = 'claude-3-5-sonnet-20241022';
   
   constructor() {
-    const apiKey = process.env.CLAUDE_API_KEY;
+    const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
       throw new Error('Claude API key is required for investigator');
     }

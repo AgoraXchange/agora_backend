@@ -47,7 +47,7 @@ export function isRailwayEnvironment(): boolean {
 /**
  * Helper function to get environment variable with fallback names
  */
-function getEnvVar(names: string[]): string | undefined {
+export function getEnvVar(names: string[]): string | undefined {
   for (const name of names) {
     if (process.env[name]) return process.env[name];
   }
@@ -62,9 +62,15 @@ export function validateEnvironment(): ValidationResult {
   const warnings: string[] = [];
   
   // Check critical variables with fallback names
-  const jwtSecret = getEnvVar(['JWT_SECRET', 'JWT_ACCESS_SECRET']);
-  if (!jwtSecret) {
-    errors.push('Missing JWT secret (JWT_SECRET or JWT_ACCESS_SECRET)');
+  const jwtAccessSecret = getEnvVar(['JWT_ACCESS_SECRET', 'JWT_SECRET']);
+  const jwtRefreshSecret = process.env.JWT_REFRESH_SECRET;
+  
+  if (!jwtAccessSecret) {
+    errors.push('Missing JWT access secret (JWT_ACCESS_SECRET or JWT_SECRET)');
+  }
+  
+  if (!jwtRefreshSecret) {
+    errors.push('Missing JWT refresh secret (JWT_REFRESH_SECRET)');
   }
   
   const contractAddress = getEnvVar(['ORACLE_CONTRACT_ADDRESS', 'MAIN_CONTRACT_ADDRESS']);

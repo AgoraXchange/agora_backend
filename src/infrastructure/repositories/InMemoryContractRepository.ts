@@ -79,6 +79,10 @@ export class InMemoryContractRepository implements IContractRepository {
     return null;
   }
 
+  async findAll(): Promise<Contract[]> {
+    return Array.from(this.contracts.values());
+  }
+
   async findContractsReadyForDecision(): Promise<Contract[]> {
     const readyContracts: Contract[] = [];
     const now = new Date();

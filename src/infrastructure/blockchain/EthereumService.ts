@@ -5,6 +5,7 @@ import { Choice } from '../../domain/entities/Choice';
 import { BettingStats, ContractEventData, BetPlacedEvent, BetRevealedEvent } from '../../domain/entities/BettingStats';
 import { CryptoService } from '../auth/CryptoService';
 import { logger } from '../logging/Logger';
+import { getEnvVar } from '../../config/validateEnv';
 
 @injectable()
 export class EthereumService implements IBlockchainService {
@@ -20,25 +21,54 @@ export class EthereumService implements IBlockchainService {
   private readonly FILTER_REFRESH_INTERVAL: number;
   private readonly ETHEREUM_POLLING_INTERVAL: number;
 
+  private initialized: boolean = false;
+  private rpcUrl: string;
+  private isRailway: boolean;
+  private useRealBlockchain: boolean;
+
   constructor(
     @inject('CryptoService') private cryptoService: CryptoService
   ) {
-    const rpcUrl = process.env.ETHEREUM_RPC_URL || 'http://localhost:8545';
-    const isRailway = !!(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID || process.env.RAILWAY_SERVICE_ID);
-    const useRealBlockchain = process.env.USE_REAL_BLOCKCHAIN === 'true';
+    // Store configuration but don't initialize heavy resources yet
+    this.rpcUrl = process.env.ETHEREUM_RPC_URL || 'http://localhost:8545';
+    this.isRailway = !!(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID || process.env.RAILWAY_SERVICE_ID);
+    this.useRealBlockchain = process.env.USE_REAL_BLOCKCHAIN === 'true';
     
     // Allow real blockchain usage in Railway if explicitly enabled
     this.mockMode = process.env.BLOCKCHAIN_MOCK_MODE === 'true' || 
                     process.env.NODE_ENV === 'development' || 
-                    (isRailway && !useRealBlockchain);
+                    (this.isRailway && !this.useRealBlockchain);
     
     // Configure intervals from environment variables
     this.ETHEREUM_POLLING_INTERVAL = parseInt(process.env.ETHEREUM_POLLING_INTERVAL || '10000');
     this.FILTER_REFRESH_INTERVAL = parseInt(process.env.FILTER_REFRESH_INTERVAL || '240000'); // 4 minutes
     
+    this.contractABI = [
+      "function declareWinner(uint256 _contractId, uint8 _winner) external",
+      "function getContract(uint256 _contractId) external view returns (address creator, string memory partyA, string memory partyB, uint256 bettingEndTime, uint8 status, uint8 winner, uint256 totalPoolA, uint256 totalPoolB, uint256 partyRewardPercentage)",
+      "function closeBetting(uint256 _contractId) external",
+      "function placeBet(uint256 _contractId, uint8 _choice) external payable",
+      "function getUserBets(uint256 _contractId, address _user) external view returns (uint256[] memory amounts, uint8[] memory choices, bool[] memory claimed)",
+      "event ContractCreated(uint256 indexed contractId, address indexed creator, string topic, string description, string partyA, string partyB, uint256 bettingEndTime)",
+      "event BetPlaced(uint256 indexed contractId, address indexed bettor, uint8 choice, uint256 amount)",
+      "event WinnerDeclared(uint256 indexed contractId, uint8 winner)",
+      "event RewardsDistributed(uint256 indexed contractId, uint256 partyReward, uint256 totalDistributed)",
+      "event RewardClaimed(uint256 indexed contractId, address indexed bettor, uint256 amount)"
+    ];
+    
+    logger.debug('EthereumService constructor completed - lazy initialization mode');
+  }
+
+  private async ensureInitialized(): Promise<void> {
+    if (this.initialized) {
+      return;
+    }
+
+    logger.debug('Initializing EthereumService provider and wallet...');
+    
     // Create provider with polling enabled to avoid filter errors
     this.provider = new ethers.JsonRpcProvider(
-      rpcUrl,
+      this.rpcUrl,
       undefined,
       { 
         polling: true,
@@ -53,7 +83,7 @@ export class EthereumService implements IBlockchainService {
       // Use a test wallet for development/testing/Railway (when real blockchain is not enabled)
       const testPrivateKey = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'; // Well-known test key
       this.wallet = new ethers.Wallet(testPrivateKey, this.provider);
-      if (isRailway && !useRealBlockchain) {
+      if (this.isRailway && !this.useRealBlockchain) {
         logger.warn('🚂 Using Railway test wallet - blockchain functionality disabled for production safety');
         logger.info('💡 To enable real blockchain, set USE_REAL_BLOCKCHAIN=true in Railway Variables');
       } else {
@@ -63,7 +93,7 @@ export class EthereumService implements IBlockchainService {
       try {
         const privateKey = this.cryptoService.getSecurePrivateKey();
         this.wallet = new ethers.Wallet(privateKey, this.provider);
-        if (isRailway) {
+        if (this.isRailway) {
           logger.info('🚀 Railway real blockchain mode enabled - using production wallet');
         } else {
           logger.info('Ethereum wallet initialized successfully');
@@ -77,24 +107,16 @@ export class EthereumService implements IBlockchainService {
       }
     }
     
-    this.contractABI = [
-      "function declareWinner(uint256 _contractId, uint8 _winner) external",
-      "function getContract(uint256 _contractId) external view returns (address creator, string memory partyA, string memory partyB, uint256 bettingEndTime, uint8 status, uint8 winner, uint256 totalPoolA, uint256 totalPoolB, uint256 partyRewardPercentage)",
-      "function closeBetting(uint256 _contractId) external",
-      "function placeBet(uint256 _contractId, uint8 _choice) external payable",
-      "function getUserBets(uint256 _contractId, address _user) external view returns (uint256[] memory amounts, uint8[] memory choices, bool[] memory claimed)",
-      "event ContractCreated(uint256 indexed contractId, address indexed creator, string topic, string description, string partyA, string partyB, uint256 bettingEndTime)",
-      "event BetPlaced(uint256 indexed contractId, address indexed bettor, uint8 choice, uint256 amount)",
-      "event WinnerDeclared(uint256 indexed contractId, uint8 winner)",
-      "event RewardsDistributed(uint256 indexed contractId, uint256 partyReward, uint256 totalDistributed)",
-      "event RewardClaimed(uint256 indexed contractId, address indexed bettor, uint256 amount)"
-    ];
+    this.initialized = true;
+    logger.debug('EthereumService initialization completed');
   }
 
   async declareWinner(
     contractId: string,
     winner: Choice
   ): Promise<string> {
+    await this.ensureInitialized();
+    
     if (this.mockMode) {
       logger.info('🎭 MOCK: Simulating blockchain submission', { contractId, winner });
       // Simulate successful transaction
@@ -106,7 +128,7 @@ export class EthereumService implements IBlockchainService {
     }
 
     try {
-      const contractAddress = process.env.MAIN_CONTRACT_ADDRESS;
+      const contractAddress = getEnvVar(['MAIN_CONTRACT_ADDRESS', 'ORACLE_CONTRACT_ADDRESS']);
       if (!contractAddress) {
         throw new Error('Main contract address not configured');
       }
@@ -133,9 +155,11 @@ export class EthereumService implements IBlockchainService {
   }
 
   async getContract(contractId: string): Promise<ContractData> {
+    await this.ensureInitialized();
+    
     try {
       // Note: We need to get the main contract address to call getContract
-      const mainContractAddress = process.env.MAIN_CONTRACT_ADDRESS;
+      const mainContractAddress = getEnvVar(['MAIN_CONTRACT_ADDRESS', 'ORACLE_CONTRACT_ADDRESS']);
       if (!mainContractAddress) {
         throw new Error('Main contract address not configured');
       }
@@ -173,7 +197,7 @@ export class EthereumService implements IBlockchainService {
   listenToContractCreated(
     callback: (event: ContractEventData) => void
   ): void {
-    const contractAddress = process.env.MAIN_CONTRACT_ADDRESS;
+    const contractAddress = getEnvVar(['MAIN_CONTRACT_ADDRESS', 'ORACLE_CONTRACT_ADDRESS']);
     if (!contractAddress) {
       logger.error('Main contract address not configured for event listening');
       return;
@@ -184,8 +208,13 @@ export class EthereumService implements IBlockchainService {
     // Store callback for cleanup
     this.eventCallbacks.set(key, callback);
     
-    // Setup polling listener
-    this.setupContractCreatedListener(contractAddress, key, callback);
+    // Setup polling listener (async but not awaited to keep interface synchronous)
+    this.setupContractCreatedListener(contractAddress, key, callback).catch(error => {
+      logger.error('Failed to setup ContractCreated listener', { 
+        error: error instanceof Error ? error.message : 'Unknown error',
+        contractAddress 
+      });
+    });
     
     logger.info('ContractCreated event listener registered with queryFilter polling', { 
       contractAddress,
@@ -193,11 +222,13 @@ export class EthereumService implements IBlockchainService {
     });
   }
 
-  private setupContractCreatedListener(
+  private async setupContractCreatedListener(
     contractAddress: string,
     key: string,
     callback: (event: ContractEventData) => void
-  ): void {
+  ): Promise<void> {
+    await this.ensureInitialized();
+    
     // Stop existing interval if any
     if (this.queryIntervals.has(key)) {
       clearInterval(this.queryIntervals.get(key));
@@ -210,12 +241,17 @@ export class EthereumService implements IBlockchainService {
     // Start polling for events
     const pollEvents = async () => {
       try {
+        logger.debug(`Polling for ContractCreated events...`);
+        
         const currentBlock = await this.provider.getBlockNumber();
         const lastBlock = this.lastCheckedBlock.get(key) || (currentBlock - 100); // Start from 100 blocks ago on first run
         
         if (lastBlock >= currentBlock) {
+          logger.debug(`No new blocks since ${lastBlock} (current: ${currentBlock})`);
           return; // No new blocks to check
         }
+
+        logger.debug(`Checking blocks ${lastBlock + 1} to ${currentBlock} for ContractCreated events`);
         
         // Query for ContractCreated events
         const filter = contract.filters.ContractCreated();
@@ -288,8 +324,13 @@ export class EthereumService implements IBlockchainService {
     // Store callback for cleanup
     this.eventCallbacks.set(key, callback);
     
-    // Setup polling listener
-    this.setupBetPlacedListener(contractAddress, key, callback);
+    // Setup polling listener (async but not awaited to keep interface synchronous)
+    this.setupBetPlacedListener(contractAddress, key, callback).catch(error => {
+      logger.error('Failed to setup BetPlaced listener', { 
+        error: error instanceof Error ? error.message : 'Unknown error',
+        contractAddress 
+      });
+    });
     
     logger.info('BetPlaced event listener registered with queryFilter polling', { 
       contractAddress,
@@ -297,11 +338,13 @@ export class EthereumService implements IBlockchainService {
     });
   }
 
-  private setupBetPlacedListener(
+  private async setupBetPlacedListener(
     contractAddress: string,
     key: string,
     callback: (event: BetPlacedEvent) => void
-  ): void {
+  ): Promise<void> {
+    await this.ensureInitialized();
+    
     // Stop existing interval if any
     if (this.queryIntervals.has(key)) {
       clearInterval(this.queryIntervals.get(key));
