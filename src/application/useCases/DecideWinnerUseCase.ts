@@ -200,13 +200,14 @@ export class DecideWinnerUseCase {
         {
           confidence: committeeResult.committeeDecision.consensus.confidenceLevel,
           reasoning: committeeResult.committeeDecision.consensus.synthesizedReasoning,
-          dataPoints: committeeResult.committeeDecision.consensus.mergedEvidence.map(e => e.source),
-          timestamp: new Date(),
-          // Additional committee-specific metadata
-          deliberationMode: 'committee',
-          totalProposals: committeeResult.deliberationMetrics.totalProposals,
-          consensusLevel: committeeResult.deliberationMetrics.consensusLevel,
-          committeeDecisionId: committeeResult.committeeDecision.id
+          dataPoints: {
+            evidence: committeeResult.committeeDecision.consensus.mergedEvidence.map(e => e.source),
+            deliberationMode: 'committee',
+            totalProposals: committeeResult.deliberationMetrics.totalProposals,
+            consensusLevel: committeeResult.deliberationMetrics.consensusLevel,
+            committeeDecisionId: committeeResult.committeeDecision.id
+          },
+          timestamp: new Date()
         }
       );
 
@@ -264,7 +265,12 @@ export class DecideWinnerUseCase {
           totalProposals: committeeResult.deliberationMetrics.totalProposals,
           deliberationTimeMs: committeeResult.deliberationMetrics.deliberationTimeMs,
           consensusLevel: committeeResult.deliberationMetrics.consensusLevel,
-          costBreakdown: committeeResult.deliberationMetrics.costBreakdown
+          costBreakdown: {
+            proposerTokens: committeeResult.deliberationMetrics.costBreakdown?.proposerTokens || 0,
+            judgeTokens: committeeResult.deliberationMetrics.costBreakdown?.judgeTokens || 0,
+            synthesizerTokens: committeeResult.deliberationMetrics.costBreakdown?.synthesizerTokens || 0,
+            totalCostUSD: (committeeResult.deliberationMetrics.costBreakdown as any)?.totalCostUSD || 0
+          }
         },
         committeeDecisionId: committeeResult.committeeDecision.id
       };
@@ -293,8 +299,13 @@ export class DecideWinnerUseCase {
         contract.id,
         aiResult.winnerId,
         {
-          ...aiResult.metadata,
-          deliberationMode: 'single_ai'
+          confidence: aiResult.metadata.confidence,
+          reasoning: aiResult.metadata.reasoning,
+          dataPoints: {
+            ...aiResult.metadata.dataPoints,
+            deliberationMode: 'single_ai'
+          },
+          timestamp: aiResult.metadata.timestamp
         }
       );
 

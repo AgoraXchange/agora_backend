@@ -12,8 +12,10 @@ export interface BettingStats {
 export interface ContractEventData {
   contractId: string;
   creator: string;
-  partyA: string;  // Simplified to just string
-  partyB: string;  // Simplified to just string
+  topic: string;          // Agreement title/topic
+  description: string;    // Agreement description
+  partyA: string;         // Simplified to just string
+  partyB: string;         // Simplified to just string
   bettingEndTime: number; // Unix timestamp
   blockNumber: number;
   transactionHash: string;

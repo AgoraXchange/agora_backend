@@ -64,6 +64,8 @@ export class MonitorContractsUseCase {
     try {
       logger.info('Processing ContractCreated event', { 
         contractId: event.contractId,
+        topic: event.topic,
+        description: event.description,
         partyA: event.partyA,
         partyB: event.partyB
       });
@@ -95,8 +97,8 @@ export class MonitorContractsUseCase {
         ContractStatus.CREATED,
         undefined, // no winner yet
         event.creator,
-        undefined, // topic not in smart contract event
-        undefined  // description not in smart contract event
+        event.topic,        // topic from smart contract event
+        event.description   // description from smart contract event
       );
 
       // Save contract to repository
@@ -105,6 +107,7 @@ export class MonitorContractsUseCase {
       logger.info('Contract saved from blockchain event', { 
         contractId: event.contractId,
         creator: event.creator,
+        topic: event.topic,
         partyA: event.partyA,
         partyB: event.partyB
       });
