@@ -17,6 +17,63 @@ export class DeliberationVisualizationController {
   ) {}
 
   /**
+   * GET /api/deliberations/:id/winner-arguments
+   * Builds three logical arguments (with evidence) and a conclusion supporting the final winner
+   * using Anthropic's Claude model. Falls back to local synthesis when API is unavailable.
+   */
+  async getWinnerJuryArguments(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      const lang = (req.query.lang as string) === 'ko' ? 'ko' : 'en';
+
+      logger.info('Generating winner jury arguments', { deliberationId: id, lang });
+
+      const decision = await this.decisionRepository.findById(id);
+      if (!decision) {
+        throw AppError.notFound('Deliberation decision not found');
+      }
+      if (decision.metadata.deliberationMode !== 'committee') {
+        throw AppError.badRequest('This decision was not made by committee deliberation');
+      }
+
+      // Gather messages for this contractId
+      const messages = this.eventEmitter.getMessageHistory(decision.contractId);
+      if (messages.length === 0) {
+        throw AppError.badRequest('No deliberation messages available in memory for this decision');
+      }
+
+      // Lazy import to avoid circular deps and to create service only when needed
+      const { ClaudeJurySynthesisService } = await import('../../infrastructure/ai/ClaudeJurySynthesisService');
+      const service = new ClaudeJurySynthesisService();
+      const result = await service.generate({
+        winnerId: decision.winnerId,
+        contractId: decision.contractId,
+        messages,
+        locale: lang as any
+      });
+
+      res.json({ success: true, data: result });
+
+      logger.info('Winner jury arguments generated', {
+        deliberationId: id,
+        winnerId: decision.winnerId
+      });
+
+    } catch (error) {
+      logger.error('Failed to generate winner jury arguments', {
+        deliberationId: req.params.id,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({ success: false, error: error.message });
+      } else {
+        res.status(500).json({ success: false, error: 'Internal server error while generating jury arguments' });
+      }
+    }
+  }
+
+  /**
    * GET /api/deliberations/:id
    * Gets complete visualization data for a deliberation
    */

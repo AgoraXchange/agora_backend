@@ -151,6 +151,48 @@ GET /api/oracle/contracts/:contractId/decision
 Authorization: Bearer <access_token>
 ```
 
+#### 승자 지지 논증 JSON 조회 (인증 불필요)
+```
+GET /api/oracle/contracts/:contractId/winner-arguments?lang=ko|en
+```
+- 설명: 특정 계약의 위원회 심의가 완료된 후, 승자를 지지하는 3개의 논리적 주장과 그로부터 도출되는 결론을 JSON으로 반환합니다.
+- 주의: 위원회 모드(committee) 결정에만 제공되며, 심의 메시지가 메모리에 존재해야 합니다.
+- 응답 예시:
+```json
+{
+  "success": true,
+  "data": {
+    "Jury1": "...",
+    "Jury2": "...",
+    "Jury3": "...",
+    "Conclusion": "..."
+  }
+}
+```
+
+### 심의(Deliberations) 엔드포인트
+
+#### 승자 지지 논증 요약 생성 (인증 필요)
+```
+GET /api/deliberations/:id/winner-arguments?lang=ko|en
+Authorization: Bearer <access_token>
+```
+- 설명: 승자 결정 시점의 토의/제안 중, 승자를 지지했던 내용들을 모아 Anthropic(Claude)로부터
+  논리적으로 재구성된 3개의 주장과 그로부터 귀결되는 결론을 JSON으로 반환합니다.
+- 응답 예시:
+```json
+{
+  "success": true,
+  "data": {
+    "Jury1": "...",
+    "Jury2": "...",
+    "Jury3": "...",
+    "Conclusion": "..."
+  }
+}
+```
+- 비고: `ANTHROPIC_API_KEY`가 설정되지 않은 경우 간단한 로컬 폴백 논리로 동일한 스키마를 반환합니다.
+
 ## 테스트
 
 ```bash
@@ -282,7 +324,8 @@ COMMITTEE_MAX_PROPOSALS_PER_AGENT=2
 
 # AI 서비스 설정 (실제 API 키 필요)
 OPENAI_API_KEY=your_actual_openai_key
-ANTHROPIC_API_KEY=your_claude_key  
+ANTHROPIC_API_KEY=your_claude_key
+ANTHROPIC_MODEL=claude-sonnet-4-20250514
 GOOGLE_API_KEY=your_gemini_key
 
 # 테스트용 (Mock 응답 사용)

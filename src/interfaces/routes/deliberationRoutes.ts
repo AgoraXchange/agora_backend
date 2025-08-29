@@ -69,6 +69,22 @@ router.get(
 );
 
 /**
+ * GET /api/deliberations/:id/winner-arguments
+ * Returns three logical arguments (with evidence) and a conclusion supporting the winner
+ */
+router.get(
+  '/:id/winner-arguments',
+  authenticate,
+  authorize(UserRole.ADMIN, UserRole.ORACLE_NODE),
+  apiRateLimiter,
+  validate(getDeliberationSchema),
+  asyncHandler(async (req, res) => {
+    const controller = getController();
+    await controller.getWinnerJuryArguments(req, res);
+  })
+);
+
+/**
  * GET /api/deliberations/:id/export
  * Exports deliberation data as a comprehensive report
  * Supports JSON and CSV formats

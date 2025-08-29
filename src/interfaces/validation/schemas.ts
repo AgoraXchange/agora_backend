@@ -147,6 +147,14 @@ export const getDecisionValidationSchema = Joi.object({
   params: contractIdSchema
 });
 
+// Oracle: get winner-arguments by contractId
+export const getWinnerArgumentsSchema = Joi.object({
+  params: contractIdSchema,
+  query: Joi.object({
+    lang: Joi.string().valid('ko', 'en').optional()
+  }).optional()
+});
+
 // Composite schemas for deliberation routes
 export const getDeliberationSchema = Joi.object({
   params: deliberationParamsSchema
