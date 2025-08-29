@@ -1,6 +1,7 @@
 import { injectable, inject } from 'inversify';
 import { IContractRepository } from '../../domain/repositories/IContractRepository';
 import { IBlockchainService } from '../../domain/services/IBlockchainService';
+import { IOracleDecisionRepository } from '../../domain/repositories/IOracleDecisionRepository';
 import { DecideWinnerUseCase } from './DecideWinnerUseCase';
 import { Contract, ContractStatus, mapChainStatusToContractStatus } from '../../domain/entities/Contract';
 import { Party } from '../../domain/entities/Party';
@@ -14,7 +15,8 @@ export class MonitorContractsUseCase {
   constructor(
     @inject('IContractRepository') private contractRepository: IContractRepository,
     @inject('IBlockchainService') private blockchainService: IBlockchainService,
-    @inject('DecideWinnerUseCase') private decideWinnerUseCase: DecideWinnerUseCase
+    @inject('DecideWinnerUseCase') private decideWinnerUseCase: DecideWinnerUseCase,
+    @inject('IOracleDecisionRepository') private decisionRepository: IOracleDecisionRepository
   ) {}
 
   async execute(): Promise<void> {
@@ -27,17 +29,41 @@ export class MonitorContractsUseCase {
     logger.debug('Running monitoring cycle...');
 
     try {
-      // 1. Update contract statuses from blockchain
-      await this.updateContractStatuses();
+      // 1. Update contract statuses from blockchain (may trigger oracle immediately)
+      const triggeredThisCycle = await this.updateContractStatuses();
+      const triggeredSet = triggeredThisCycle ?? new Set<string>();
 
       // 2. Monitor existing contracts ready for decision
-      const contractsReadyForDecision = await this.contractRepository.findContractsReadyForDecision();
+      let contractsReadyForDecision = await this.contractRepository.findContractsReadyForDecision();
+      // Avoid duplicate triggers within the same cycle (guard against undefined)
+      if (triggeredSet.size > 0) {
+        contractsReadyForDecision = contractsReadyForDecision.filter(c => !triggeredSet.has(c.id));
+      }
       
       if (contractsReadyForDecision.length > 0) {
         logger.info(`Found ${contractsReadyForDecision.length} contracts ready for decision`);
       }
       
       for (const contract of contractsReadyForDecision) {
+        // Skip if decision already exists (avoid repeated attempts within/ across cycles)
+        try {
+          const existing = await this.decisionRepository.findByContractId(contract.id);
+          if (existing) {
+            logger.debug('Skipping decision - already exists in repository', { contractId: contract.id });
+            continue;
+          }
+        } catch (_) {}
+
+        // Double-check on-chain status to avoid calling oracle when not closed
+        try {
+          const chain = await this.blockchainService.getContract(contract.id);
+          if (chain.status !== 1) { // 1 = Closed (ABBetting)
+            logger.debug('Skipping decision - on-chain status not closed', { contractId: contract.id, chainStatus: chain.status });
+            continue;
+          }
+        } catch (err) {
+          logger.warn('Failed to verify on-chain status before decision, proceeding cautiously', { contractId: contract.id, error: err instanceof Error ? err.message : 'Unknown error' });
+        }
         logger.info(`Processing contract ${contract.id} for winner decision`);
         
         const result = await this.decideWinnerUseCase.execute({
@@ -73,6 +99,45 @@ export class MonitorContractsUseCase {
     // Listen for new contract creation events
     this.blockchainService.listenToContractCreated((event: ContractEventData) => {
       this.handleContractCreated(event);
+    });
+
+    // Listen to main contract events
+    this.blockchainService.listenToBetPlacedGlobal((event: BetPlacedEvent) => {
+      this.handleBetPlaced(event);
+    });
+
+    this.blockchainService.listenToWinnerDeclared((event) => {
+      logger.info('WinnerDeclared event received', {
+        contractId: event.contractId,
+        winner: event.winner,
+        blockNumber: event.blockNumber
+      });
+    });
+
+    this.blockchainService.listenToRewardsDistributed((event) => {
+      logger.info('RewardsDistributed event received', {
+        contractId: event.contractId,
+        partyReward: event.partyReward,
+        platformFee: event.platformFee,
+        totalDistributed: event.totalDistributed,
+        blockNumber: event.blockNumber
+      });
+    });
+
+    this.blockchainService.listenToRewardClaimed((event) => {
+      logger.info('RewardClaimed event received', {
+        contractId: event.contractId,
+        bettor: event.bettor,
+        amount: event.amount,
+        blockNumber: event.blockNumber
+      });
+    });
+
+    this.blockchainService.listenToContractCancelled((event) => {
+      logger.info('ContractCancelled event received', {
+        contractId: event.contractId,
+        blockNumber: event.blockNumber
+      });
     });
 
     logger.info('Blockchain event listeners initialized');
@@ -130,14 +195,6 @@ export class MonitorContractsUseCase {
         partyB: event.partyB
       });
 
-      // Start listening for bet placed events for this contract
-      this.blockchainService.listenToBetPlaced(
-        event.transactionHash, // Using transaction hash as contract address
-        (betEvent: BetPlacedEvent) => {
-          this.handleBetPlaced(betEvent);
-        }
-      );
-
     } catch (error) {
       logger.error('Error processing ContractCreated event', {
         contractId: event.contractId,
@@ -149,7 +206,8 @@ export class MonitorContractsUseCase {
   /**
    * Updates contract statuses by querying the blockchain
    */
-  private async updateContractStatuses(): Promise<void> {
+  private async updateContractStatuses(): Promise<Set<string>> {
+    const triggered = new Set<string>();
     try {
       const contracts = await this.contractRepository.findAll();
       
@@ -172,6 +230,9 @@ export class MonitorContractsUseCase {
           const chainData = await this.blockchainService.getContract(contract.id);
           const newStatus = mapChainStatusToContractStatus(chainData.status);
 
+          // NOTE: We do not proactively call closeBetting on-chain here.
+          // Open→Closed 전용 이벤트가 없으므로 상태는 주기적 조회로만 감지합니다.
+
           // Check if status has changed
           if (contract.status !== newStatus) {
             const oldStatus = contract.status;
@@ -187,9 +248,20 @@ export class MonitorContractsUseCase {
               chainStatus: chainData.status
             });
 
-            // If betting just closed, trigger winner decision in next cycle
+            // If betting just closed, trigger oracle immediately (no dedicated event on-chain)
             if (newStatus === ContractStatus.BETTING_CLOSED) {
-              logger.info(`Contract ${contract.id} betting closed - will be processed for winner decision`);
+              logger.info(`Contract ${contract.id} betting closed - triggering oracle decision now`);
+              try {
+                const result = await this.decideWinnerUseCase.execute({ contractId: contract.id });
+                if (result.success) {
+                  logger.info('Oracle decided winner after status update', { contractId: contract.id, winnerId: result.winnerId, transactionHash: result.transactionHash });
+                } else {
+                  logger.warn('Oracle decision failed after status update', { contractId: contract.id, error: result.error });
+                }
+                triggered.add(contract.id);
+              } catch (err) {
+                logger.warn('Oracle execution error after status update', { contractId: contract.id, error: err instanceof Error ? err.message : 'Unknown error' });
+              }
             }
           }
 
@@ -213,6 +285,7 @@ export class MonitorContractsUseCase {
         error: error instanceof Error ? error.message : 'Unknown error'
       });
     }
+    return triggered;
   }
 
   private handleBetPlaced(event: BetPlacedEvent): void {

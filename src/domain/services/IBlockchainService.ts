@@ -23,15 +23,42 @@ export interface IBlockchainService {
 
   getContract(contractId: string): Promise<ContractData>;
   
+  /**
+   * Closes betting for a contract on-chain when the betting period has ended
+   */
+  closeBetting(contractId: string): Promise<string>;
+  
   // getContractStats removed - not in smart contract
   
   listenToContractCreated(
     callback: (event: ContractEventData) => void
   ): void;
 
+  // Legacy per-address listener (kept for backward compatibility)
   listenToBetPlaced(
     contractAddress: string,
     callback: (event: BetPlacedEvent) => void
+  ): void;
+
+  // Global listeners on main contract
+  listenToBetPlacedGlobal(
+    callback: (event: BetPlacedEvent) => void
+  ): void;
+
+  listenToWinnerDeclared(
+    callback: (event: { contractId: string; winner: number; blockNumber: number; transactionHash: string }) => void
+  ): void;
+
+  listenToRewardsDistributed(
+    callback: (event: { contractId: string; partyReward: string; platformFee: string; totalDistributed: string; blockNumber: number; transactionHash: string }) => void
+  ): void;
+
+  listenToRewardClaimed(
+    callback: (event: { contractId: string; bettor: string; amount: string; blockNumber: number; transactionHash: string }) => void
+  ): void;
+
+  listenToContractCancelled(
+    callback: (event: { contractId: string; blockNumber: number; transactionHash: string }) => void
   ): void;
   
   // Keep old name for backward compatibility

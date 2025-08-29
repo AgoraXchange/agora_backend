@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import { createOracleRoutes } from './interfaces/routes/oracleRoutes';
 import { createAuthRoutes } from './interfaces/routes/authRoutes';
 import { createDeliberationRoutes } from './interfaces/routes/deliberationRoutes';
+import { createDiagnosticsRoutes } from './interfaces/routes/diagnosticsRoutes';
 import { errorHandler, notFoundHandler } from './interfaces/middleware/errorMiddleware';
 import { apiRateLimiter } from './interfaces/middleware/rateLimitMiddleware';
 import { logger } from './infrastructure/logging/Logger';
@@ -22,6 +23,10 @@ try {
 export function createApp() {
   const app = express();
 
+  // Behind Railway/other proxies, enable trust proxy so req.ip and rate-limit work with X-Forwarded-For
+  // Must be set before any middleware that relies on client IP (e.g., rate limiters)
+  app.set('trust proxy', 1);
+
   // Health check FIRST - before any middleware to ensure fast Railway response
   app.get('/health', (req, res) => {
     res.status(200).json({
@@ -31,6 +36,11 @@ export function createApp() {
       uptime: process.uptime(),
       version: packageVersion
     });
+  });
+
+  // Some platforms use HEAD for healthchecks
+  app.head('/health', (req, res) => {
+    res.status(200).end();
   });
 
   // Security middleware
@@ -79,10 +89,21 @@ export function createApp() {
     next();
   });
 
+  // Root route (basic sanity/uptime check)
+  app.get('/', (_req, res) => {
+    res.status(200).send('OK');
+  });
+
+  // Some environments issue HEAD on root as healthcheck
+  app.head('/', (_req, res) => {
+    res.status(200).end();
+  });
+
   // API routes
   app.use('/api/auth', createAuthRoutes());
   app.use('/api/oracle', createOracleRoutes());
   app.use('/api/deliberations', createDeliberationRoutes());
+  app.use('/api/diagnostics', createDiagnosticsRoutes());
 
   // 404 handler
   app.use(notFoundHandler);

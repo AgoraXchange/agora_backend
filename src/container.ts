@@ -34,14 +34,16 @@ const container = new Container();
 // Database connection
 container.bind<MongoDBConnection>('MongoDBConnection').to(MongoDBConnection).inSingletonScope();
 
-// Repositories - Use MongoDB in production, InMemory for testing
-const useMongoDB = process.env.USE_MONGODB === 'true';
+// Repositories - Use MongoDB only when explicitly enabled AND URI is valid
+const isValidMongoUri = (uri?: string) => !!uri && (uri.startsWith('mongodb://') || uri.startsWith('mongodb+srv://'));
+const useMongoDB = process.env.USE_MONGODB === 'true' && isValidMongoUri(process.env.MONGODB_URI);
 if (useMongoDB) {
   container.bind<IContractRepository>('IContractRepository').to(MongoContractRepository);
   container.bind<IOracleDecisionRepository>('IOracleDecisionRepository').to(MongoOracleDecisionRepository);
 } else {
-  container.bind<IContractRepository>('IContractRepository').to(InMemoryContractRepository);
-  container.bind<IOracleDecisionRepository>('IOracleDecisionRepository').to(InMemoryOracleDecisionRepository);
+  // Use singletons so all use cases share the same in-memory data store
+  container.bind<IContractRepository>('IContractRepository').to(InMemoryContractRepository).inSingletonScope();
+  container.bind<IOracleDecisionRepository>('IOracleDecisionRepository').to(InMemoryOracleDecisionRepository).inSingletonScope();
 }
 
 // Services - Critical services as singletons for performance and Railway stability

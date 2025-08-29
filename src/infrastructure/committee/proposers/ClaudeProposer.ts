@@ -41,7 +41,8 @@ Analyze ethically. Return JSON.`
   }
 
   protected getModelName(): string {
-    return process.env.CLAUDE_MODEL || 'claude-3-sonnet';
+    // Prefer Railway variable ANTHROPIC_MODEL when present
+    return process.env.ANTHROPIC_MODEL || process.env.CLAUDE_MODEL || 'claude-sonnet-4-20250514';
   }
 
   protected async callAIModel(prompt: string, temperature: number): Promise<{

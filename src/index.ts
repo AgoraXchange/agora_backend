@@ -17,7 +17,8 @@ if (envResult.isValid) {
 }
 
 const envDefaults = getEnvDefaults();
-const PORT = envDefaults.PORT;
+// Ensure PORT is a number to satisfy platforms like Railway
+const PORT: number = Number(process.env.PORT ?? envDefaults.PORT ?? 3000);
 const MONITORING_INTERVAL = envDefaults.MONITORING_INTERVAL;
 
 let monitoringIntervalId: NodeJS.Timeout | null = null;
@@ -30,8 +31,11 @@ async function startServer() {
       nodeVersion: process.version,
       environment: envDefaults.NODE_ENV
     });
-    // Initialize MongoDB connection if enabled
-    if (envDefaults.USE_MONGODB) {
+    // Initialize MongoDB connection if enabled and URI is valid
+    const mongoUri = process.env.MONGODB_URI;
+    const wantMongo = envDefaults.USE_MONGODB === true;
+    const mongoUriValid = !!mongoUri && (mongoUri.startsWith('mongodb://') || mongoUri.startsWith('mongodb+srv://'));
+    if (wantMongo && mongoUriValid) {
       logger.info('Connecting to MongoDB...');
       try {
         const mongoConnection = container.get<MongoDBConnection>('MongoDBConnection');
@@ -40,12 +44,16 @@ async function startServer() {
         readinessTracker.markReady('mongodb');
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        logger.error('MongoDB connection failed', { error: errorMessage });
+        logger.error('Failed to connect to MongoDB', { error: errorMessage });
         readinessTracker.markNotReady('mongodb', errorMessage);
         throw new Error(`MongoDB connection failed: ${errorMessage}`);
       }
     } else {
-      logger.info('MongoDB disabled - running without database');
+      if (wantMongo && !mongoUriValid) {
+        logger.warn('MongoDB URI invalid or missing - disabling MongoDB and continuing without database');
+      } else {
+        logger.info('MongoDB disabled - running without database');
+      }
       readinessTracker.markReady('mongodb'); // Mark as ready since it's not required
     }
 
@@ -54,7 +62,7 @@ async function startServer() {
 
     // Start server with promise-based approach for better error handling
     server = await new Promise((resolve, reject) => {
-      const serverInstance = app.listen(PORT, (error?: Error) => {
+      const serverInstance = app.listen(PORT, '0.0.0.0', (error?: Error) => {
         if (error) {
           readinessTracker.markNotReady('server', error.message);
           reject(error);

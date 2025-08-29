@@ -72,14 +72,37 @@ export class DecideWinnerUseCase {
       }
 
       if (!contract.canDecideWinner()) {
-        return { 
-          success: false, 
-          error: 'Contract is not ready for winner decision' 
-        };
+        // Fallback: consult on-chain status to avoid stale local state blocking decision
+        try {
+          const chainData = await this.blockchainService.getContract(input.contractId);
+          const chainClosed = chainData.status === 1; // Closed in ABBetting
+          const nowMs = Date.now();
+          const bettingEndMs = chainData.bettingEndTime * 1000;
+          if (chainClosed && nowMs >= bettingEndMs) {
+            contract.status = ContractStatus.BETTING_CLOSED;
+            await this.contractRepository.update(contract);
+          }
+        } catch (_) {
+          // ignore chain read errors and keep original status
+        }
+        if (!contract.canDecideWinner()) {
+          return { 
+            success: false, 
+            error: 'Contract is not ready for winner decision' 
+          };
+        }
       }
 
       const existingDecision = await this.decisionRepository.findByContractId(input.contractId);
       if (existingDecision) {
+        // Ensure local contract reflects decided state to prevent repeated attempts in subsequent cycles
+        try {
+          if (!contract.winnerId || contract.winnerId !== existingDecision.winnerId || contract.status !== ContractStatus.DECIDED) {
+            contract.winnerId = existingDecision.winnerId;
+            contract.status = ContractStatus.DECIDED;
+            await this.contractRepository.update(contract);
+          }
+        } catch (_) { /* ignore persistence issues here */ }
         return { 
           success: false, 
           error: 'Winner already decided for this contract' 

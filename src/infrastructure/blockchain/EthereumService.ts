@@ -45,15 +45,19 @@ export class EthereumService implements IBlockchainService {
     
     this.contractABI = [
       "function declareWinner(uint256 _contractId, uint8 _winner) external",
-      "function getContract(uint256 _contractId) external view returns (address creator, string memory partyA, string memory partyB, uint256 bettingEndTime, uint8 status, uint8 winner, uint256 totalPoolA, uint256 totalPoolB, uint256 partyRewardPercentage)",
+      // Struct return type (ABBetting.Contract)
+      "function getContract(uint256 _contractId) view returns ((address creator, string topic, string description, string partyA, string partyB, uint256 bettingEndTime, uint8 status, uint8 winner, uint256 totalPoolA, uint256 totalPoolB, uint256 partyRewardPercentage, uint256 minBetAmount, uint256 maxBetAmount, uint256 totalBettors, uint256 totalComments))",
       "function closeBetting(uint256 _contractId) external",
-      "function placeBet(uint256 _contractId, uint8 _choice) external payable",
-      "function getUserBets(uint256 _contractId, address _user) external view returns (uint256[] memory amounts, uint8[] memory choices, bool[] memory claimed)",
+      // keep legacy entries commented or removed; not used by backend
+      // "function placeBet(uint256 _contractId, uint8 _choice) external payable",
+      // "function getUserBets(uint256 _contractId, address _user) external view returns (uint256[] memory amounts, uint8[] memory choices, bool[] memory claimed)",
       "event ContractCreated(uint256 indexed contractId, address indexed creator, string topic, string description, string partyA, string partyB, uint256 bettingEndTime)",
       "event BetPlaced(uint256 indexed contractId, address indexed bettor, uint8 choice, uint256 amount)",
       "event WinnerDeclared(uint256 indexed contractId, uint8 winner)",
-      "event RewardsDistributed(uint256 indexed contractId, uint256 partyReward, uint256 totalDistributed)",
-      "event RewardClaimed(uint256 indexed contractId, address indexed bettor, uint256 amount)"
+      // Include platformFee per ABBetting
+      "event RewardsDistributed(uint256 indexed contractId, uint256 partyReward, uint256 platformFee, uint256 totalDistributed)",
+      "event RewardClaimed(uint256 indexed contractId, address indexed bettor, uint256 amount)",
+      "event ContractCancelled(uint256 indexed contractId)"
     ];
     
     logger.debug('EthereumService constructor completed - lazy initialization mode');
@@ -78,6 +82,24 @@ export class EthereumService implements IBlockchainService {
     
     // Add provider error handling
     this.setupProviderErrorHandling();
+
+    // Proactively verify network to catch invalid RPC URLs (e.g., 405 HTML endpoints)
+    try {
+      // Try to detect network quickly; if it fails, degrade to mock in Railway
+      await this.provider.getNetwork();
+    } catch (err: any) {
+      logger.error('RPC network detection failed', {
+        rpcUrl: this.rpcUrl,
+        error: err?.message || String(err)
+      });
+      if (this.isRailway) {
+        logger.warn('Degrading to MOCK blockchain mode due to RPC failure on Railway');
+        this.mockMode = true;
+      } else {
+        // Re-throw outside Railway so local dev can notice misconfiguration
+        // But keep behavior consistent with earlier logic by not throwing here; log instead
+      }
+    }
     
     if (this.mockMode) {
       // Use a test wallet for development/testing/Railway (when real blockchain is not enabled)
@@ -165,22 +187,20 @@ export class EthereumService implements IBlockchainService {
       }
       
       const contract = new ethers.Contract(mainContractAddress, this.contractABI, this.provider);
-      // Call getContract with contractId (uint256), not contract address
+      // Call getContract with contractId (uint256), returns struct
       const result = await contract.getContract(contractId);
-      
-      // Parse the returned tuple in the correct order
-      // Returns: (creator, partyA, partyB, bettingEndTime, status, winner, totalPoolA, totalPoolB, partyRewardPercentage)
+      // Ethers v6 returns a struct-like object with named properties
       return {
         contractId: contractId,
-        creator: result[0],  // address
-        partyA: result[1],   // string
-        partyB: result[2],   // string
-        bettingEndTime: Number(result[3]),  // uint256
-        status: Number(result[4]),  // ContractStatus enum
-        winner: Number(result[5]),  // Choice enum
-        totalPoolA: result[6].toString(),  // uint256 as string
-        totalPoolB: result[7].toString(),  // uint256 as string
-        partyRewardPercentage: Number(result[8])  // uint256
+        creator: result.creator,
+        partyA: result.partyA,
+        partyB: result.partyB,
+        bettingEndTime: Number(result.bettingEndTime),
+        status: Number(result.status),
+        winner: Number(result.winner),
+        totalPoolA: result.totalPoolA.toString(),
+        totalPoolB: result.totalPoolB.toString(),
+        partyRewardPercentage: Number(result.partyRewardPercentage)
       };
     } catch (error) {
       logger.error('Failed to get contract data', { 
@@ -191,12 +211,41 @@ export class EthereumService implements IBlockchainService {
     }
   }
 
+  async closeBetting(contractId: string): Promise<string> {
+    await this.ensureInitialized();
+
+    if (this.mockMode) {
+      logger.info('🎭 MOCK: Simulating closeBetting', { contractId });
+      return `0xmockclose${Date.now().toString(16)}`;
+    }
+
+    if (!this.wallet) throw new Error('Wallet not initialized');
+
+    try {
+      const contractAddress = getEnvVar(['MAIN_CONTRACT_ADDRESS', 'ORACLE_CONTRACT_ADDRESS']);
+      if (!contractAddress) throw new Error('Main contract address not configured');
+
+      const contract = new ethers.Contract(contractAddress, this.contractABI, this.wallet);
+      const tx = await contract.closeBetting(contractId);
+      const receipt = await tx.wait();
+      logger.info('Betting closed on blockchain', { contractId, transactionHash: receipt.hash });
+      return receipt.hash;
+    } catch (err) {
+      logger.error('Blockchain closeBetting error', { error: err instanceof Error ? err.message : 'Unknown error', contractId });
+      throw new Error('Failed to close betting on blockchain');
+    }
+  }
+
   // getContractStats removed - not available in smart contract
   // Use getContract() and extract totalPoolA/totalPoolB for betting statistics
 
   listenToContractCreated(
     callback: (event: ContractEventData) => void
   ): void {
+    if (this.mockMode) {
+      logger.info('🎭 MOCK: ContractCreated listener not registered (mock mode)');
+      return;
+    }
     const contractAddress = getEnvVar(['MAIN_CONTRACT_ADDRESS', 'ORACLE_CONTRACT_ADDRESS']);
     if (!contractAddress) {
       logger.error('Main contract address not configured for event listening');
@@ -319,6 +368,10 @@ export class EthereumService implements IBlockchainService {
     contractAddress: string,
     callback: (event: BetPlacedEvent) => void
   ): void {
+    if (this.mockMode) {
+      logger.info('🎭 MOCK: BetPlaced listener not registered (mock mode)', { contractAddress });
+      return;
+    }
     const key = `${contractAddress}-BetPlaced`;
     
     // Store callback for cleanup
@@ -431,6 +484,132 @@ export class EthereumService implements IBlockchainService {
     this.listenToBetPlaced(contractAddress, callback);
   }
 
+  listenToBetPlacedGlobal(
+    callback: (event: BetPlacedEvent) => void
+  ): void {
+    const contractAddress = getEnvVar(['MAIN_CONTRACT_ADDRESS', 'ORACLE_CONTRACT_ADDRESS']);
+    if (!contractAddress) {
+      logger.error('Main contract address not configured for BetPlaced');
+      return;
+    }
+    const key = `${contractAddress}-BetPlaced`;
+    this.eventCallbacks.set(key, callback);
+    this.setupBetPlacedListener(contractAddress, key, callback).catch(error => {
+      logger.error('Failed to setup global BetPlaced listener', { 
+        error: error instanceof Error ? error.message : 'Unknown error',
+        contractAddress 
+      });
+    });
+    logger.info('BetPlaced global listener registered with queryFilter polling', { 
+      contractAddress,
+      pollingInterval: this.ETHEREUM_POLLING_INTERVAL
+    });
+  }
+
+  private registerMainEventPolling(
+    eventName: string,
+    mapper: (args: any, log: any) => any,
+    callback: (event: any) => void
+  ): void {
+    if (this.mockMode) {
+      logger.info(`🎭 MOCK: ${eventName} listener not registered (mock mode)`);
+      return;
+    }
+    const contractAddress = getEnvVar(['MAIN_CONTRACT_ADDRESS', 'ORACLE_CONTRACT_ADDRESS']);
+    if (!contractAddress) {
+      logger.error('Main contract address not configured for event listening', { eventName });
+      return;
+    }
+    const key = `${contractAddress}-${eventName}`;
+    this.eventCallbacks.set(key, callback);
+    (async () => {
+      await this.ensureInitialized();
+      if (this.queryIntervals.has(key)) {
+        clearInterval(this.queryIntervals.get(key)!);
+      }
+      const contract = new ethers.Contract(contractAddress, this.contractABI, this.provider);
+      this.eventListeners.set(key, contract);
+      const poll = async () => {
+        try {
+          const currentBlock = await this.provider.getBlockNumber();
+          const lastBlock = this.lastCheckedBlock.get(key) || (currentBlock - 100);
+          if (lastBlock >= currentBlock) return;
+          const filter = (contract as any).filters[eventName]();
+          const events = await contract.queryFilter(filter, lastBlock + 1, currentBlock);
+          for (const ev of events) {
+            try {
+              if (!('args' in ev) || !ev.args) continue;
+              const data = mapper(ev.args, ev);
+              callback(data);
+            } catch (err) {
+              logger.error(`Error processing ${eventName} event`, { 
+                error: err instanceof Error ? err.message : 'Unknown error',
+                transactionHash: (ev as any).transactionHash 
+              });
+            }
+          }
+          this.lastCheckedBlock.set(key, currentBlock);
+        } catch (err) {
+          logger.error(`Error polling for ${eventName} events`, { 
+            error: err instanceof Error ? err.message : 'Unknown error',
+            key 
+          });
+        }
+      };
+      // initial
+      poll().catch(e => logger.error(`Initial ${eventName} poll failed`, { error: e instanceof Error ? e.message : 'Unknown error' }));
+      const interval = setInterval(poll, this.ETHEREUM_POLLING_INTERVAL);
+      this.queryIntervals.set(key, interval);
+      logger.info(`${eventName} listener registered with queryFilter polling`, { contractAddress, pollingInterval: this.ETHEREUM_POLLING_INTERVAL });
+    })().catch(e => logger.error('Failed to setup event polling', { eventName, error: e instanceof Error ? e.message : 'Unknown error' }));
+  }
+
+  listenToWinnerDeclared(
+    callback: (event: { contractId: string; winner: number; blockNumber: number; transactionHash: string }) => void
+  ): void {
+    this.registerMainEventPolling('WinnerDeclared', (args: any, log: any) => ({
+      contractId: args[0].toString(),
+      winner: Number(args[1]),
+      blockNumber: log.blockNumber,
+      transactionHash: log.transactionHash
+    }), callback as any);
+  }
+
+  listenToRewardsDistributed(
+    callback: (event: { contractId: string; partyReward: string; platformFee: string; totalDistributed: string; blockNumber: number; transactionHash: string }) => void
+  ): void {
+    this.registerMainEventPolling('RewardsDistributed', (args: any, log: any) => ({
+      contractId: args[0].toString(),
+      partyReward: args[1].toString(),
+      platformFee: args[2].toString(),
+      totalDistributed: args[3].toString(),
+      blockNumber: log.blockNumber,
+      transactionHash: log.transactionHash
+    }), callback as any);
+  }
+
+  listenToRewardClaimed(
+    callback: (event: { contractId: string; bettor: string; amount: string; blockNumber: number; transactionHash: string }) => void
+  ): void {
+    this.registerMainEventPolling('RewardClaimed', (args: any, log: any) => ({
+      contractId: args[0].toString(),
+      bettor: args[1],
+      amount: args[2].toString(),
+      blockNumber: log.blockNumber,
+      transactionHash: log.transactionHash
+    }), callback as any);
+  }
+
+  listenToContractCancelled(
+    callback: (event: { contractId: string; blockNumber: number; transactionHash: string }) => void
+  ): void {
+    this.registerMainEventPolling('ContractCancelled', (args: any, log: any) => ({
+      contractId: args[0].toString(),
+      blockNumber: log.blockNumber,
+      transactionHash: log.transactionHash
+    }), callback as any);
+  }
+
   listenToContractEvents(
     contractAddress: string,
     eventName: string,
@@ -528,5 +707,24 @@ export class EthereumService implements IBlockchainService {
     this.eventCallbacks.clear();
     this.retryCount.clear();
     this.lastCheckedBlock.clear();
+  }
+
+  // Diagnostics for runtime verification in PaaS environments
+  public getDiagnostics() {
+    return {
+      mockMode: this.mockMode,
+      isRailway: this.isRailway,
+      useRealBlockchain: this.useRealBlockchain,
+      rpcUrlConfigured: !!this.rpcUrl,
+      pollingInterval: this.ETHEREUM_POLLING_INTERVAL,
+      filterRefreshInterval: this.FILTER_REFRESH_INTERVAL,
+      providerInitialized: !!this.provider,
+      walletInitialized: !!this.wallet,
+      registeredListeners: Array.from(this.eventListeners.keys()),
+      lastCheckedBlocks: Array.from(this.lastCheckedBlock.entries())
+        .reduce((acc, [k, v]) => { acc[k] = v; return acc; }, {} as Record<string, number>),
+      activeQueryIntervals: Array.from(this.queryIntervals.keys()),
+      contractAddressConfigured: !!getEnvVar(['MAIN_CONTRACT_ADDRESS', 'ORACLE_CONTRACT_ADDRESS'])
+    };
   }
 }

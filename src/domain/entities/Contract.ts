@@ -14,10 +14,11 @@ export enum ContractStatus {
  */
 export function mapChainStatusToContractStatus(chainStatus: number): ContractStatus {
   switch (chainStatus) {
-    case 0: return ContractStatus.BETTING_OPEN;     // Open
+    case 0: return ContractStatus.BETTING_OPEN;     // Active
     case 1: return ContractStatus.BETTING_CLOSED;   // Closed
-    case 2: return ContractStatus.DECIDED;          // Winner Declared
+    case 2: return ContractStatus.DECIDED;          // Resolved
     case 3: return ContractStatus.DISTRIBUTED;      // Distributed
+    case 4: return ContractStatus.DISTRIBUTED;      // Cancelled -> terminal state
     default: return ContractStatus.CREATED;         // Fallback for unknown status
   }
 }
