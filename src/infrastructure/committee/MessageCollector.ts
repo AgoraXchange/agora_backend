@@ -65,19 +65,19 @@ export class MessageCollector {
   /**
    * Starts a new phase
    */
-  startPhase(phase: 'proposing' | 'judging' | 'consensus'): void {
+  startPhase(phase: 'proposing' | 'discussion' | 'consensus'): void {
     this.phaseStartTimes[phase] = new Date();
     
     const phaseNames = {
       proposing: '제안 생성 단계',
-      judging: '심사 단계',
+      discussion: '토의 단계',
       consensus: '합의 단계'
-    };
+    } as const;
     
     const message = DeliberationMessage.createProgress(
       phase, 
       `${phaseNames[phase]} 시작`, 
-      phase === 'proposing' ? 10 : phase === 'judging' ? 40 : 80
+      phase === 'proposing' ? 10 : phase === 'discussion' ? 40 : 80
     );
     this.addMessage(message);
   }
@@ -231,8 +231,8 @@ export class MessageCollector {
       .map((item, index) => ({ ...item, rank: index + 1 }));
     
     const message = DeliberationMessage.createProgress(
-      'judging', 
-      `심사 완료 (총 ${evaluations.length}개 평가)`, 
+      'discussion', 
+      `토의 완료 (총 ${evaluations.length}개 평가)`, 
       70
     );
     this.addMessage(message);
@@ -423,7 +423,7 @@ export class MessageCollector {
   }
 
   private buildProgressData(): ProgressData {
-    const phases = ['proposing', 'judging', 'consensus', 'completed'];
+    const phases = ['proposing', 'discussion', 'consensus', 'completed'];
     const completedSteps = this.messages
       .filter(m => m.messageType === 'progress')
       .map(m => m.content.progress?.step || '');
@@ -526,7 +526,7 @@ export class MessageCollector {
     }));
 
     const phaseBreakdown: Record<string, number> = {};
-    const phases = ['proposing', 'judging', 'consensus'];
+    const phases = ['proposing', 'discussion', 'consensus'];
     
     phases.forEach(phase => {
       const phaseMessages = this.messages.filter(m => m.phase === phase);

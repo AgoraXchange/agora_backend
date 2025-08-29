@@ -1,4 +1,4 @@
-export type DeliberationPhase = 'proposing' | 'judging' | 'consensus' | 'completed';
+export type DeliberationPhase = 'proposing' | 'discussion' | 'consensus' | 'completed';
 export type MessageType = 'proposal' | 'evaluation' | 'comparison' | 'vote' | 'synthesis' | 'progress';
 
 export interface DeliberationMessageContent {
@@ -76,10 +76,10 @@ export class DeliberationMessage {
   ): DeliberationMessage {
     return new DeliberationMessage(
       `evaluation_${proposalId}_${Date.now()}`,
-      'judging',
+      'discussion',
       'evaluation',
       {
-        text: `규칙 기반 평가 완료: ${reasoning.join(', ')}`,
+        text: `토의 평가 결과: ${reasoning.join(', ')}`,
         scores,
         reasoning
       },
@@ -103,7 +103,7 @@ export class DeliberationMessage {
   ): DeliberationMessage {
     return new DeliberationMessage(
       `comparison_${proposalAId}_${proposalBId}_${round}_${Date.now()}`,
-      'judging',
+      'discussion',
       'comparison',
       {
         text: `쌍대 비교 Round ${round}: ${winner} 승리`,

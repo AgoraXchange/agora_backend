@@ -541,7 +541,7 @@ export class DeliberationVisualizationController {
   }
 
   private calculatePhaseBreakdown(messages: DeliberationMessage[]): Record<string, number> {
-    const phases = ['proposing', 'judging', 'consensus'];
+    const phases = ['proposing', 'discussion', 'consensus'];
     const breakdown: Record<string, number> = {};
 
     phases.forEach(phase => {

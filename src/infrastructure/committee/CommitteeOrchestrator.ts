@@ -19,6 +19,7 @@ export class CommitteeOrchestrator implements ICommitteeService {
   private agentWeights: Record<string, number> = {};
   private config: CommitteeConfiguration;
   private currentDeliberationId?: string;
+  private lastAgentWinners: Map<string, string> = new Map();
 
   constructor(
     @inject('ProposerAgents') private proposerAgents: IAgentService[],
@@ -52,28 +53,70 @@ export class CommitteeOrchestrator implements ICommitteeService {
       this.messageCollector.completeProposalPhase(proposals);
       logger.info(`Generated ${proposals.length} proposals from ${this.proposerAgents.length} agents`);
 
-      // Phase 2: Judge and evaluate proposals
-      this.messageCollector.startPhase('judging');
-      const evaluations = await this.evaluateProposals(proposals);
-      this.messageCollector.completeJudgmentPhase(evaluations);
-      logger.info(`Completed ${evaluations.length} evaluations`);
+      // Phases 2 & 3: Repeat Discussion -> Voting until unanimity
+      let unanimousWinner: string | null = null;
+      const maxRounds = Math.max(1, parseInt(process.env.UNANIMOUS_MAX_ROUNDS || '10'));
+      const agentNameMap = new Map<string, string>(this.proposerAgents.map(a => [a.agentId, a.agentName]));
+      let lastVotes: Array<[string, string]> = [];
 
-      // Check for early exit
-      if (input.enableEarlyExit && this.shouldEarlyExit(evaluations, input.consensusThreshold || 0.8)) {
-        logger.info('Early exit triggered due to strong consensus');
+      let evaluations: JudgeEvaluation[] = [];
+      for (let round = 1; round <= maxRounds; round++) {
+        // 2단계: 토의
+        this.messageCollector.startPhase('discussion');
+        evaluations = await this.evaluateProposals(proposals, input);
+        this.messageCollector.completeJudgmentPhase(evaluations);
+        logger.info(`Discussion round ${round} completed`);
+
+        // 3단계: 투표
+        this.messageCollector.startVoting('majority', this.proposerAgents.length);
+        const winners = Array.from(this.lastAgentWinners.entries());
+        lastVotes = winners;
+        const uniqueChoices = new Set<string>(winners.map(([_, w]) => w));
+
+        // 투표 메시지 송출
+        winners.forEach(([agentId, choice]) => {
+          const name = agentNameMap.get(agentId) || agentId;
+          this.messageCollector.collectVote(agentId, name, choice, 1, 1, 1);
+        });
+
+        if (uniqueChoices.size === 1) {
+          unanimousWinner = winners[0]?.[1] || null;
+          logger.info('Unanimity achieved', { winner: unanimousWinner, round });
+          break;
+        } else {
+          logger.info('Unanimity not reached, continuing discussion', {
+            round,
+            choices: Array.from(uniqueChoices.values())
+          });
+          continue;
+        }
       }
 
-      // Phase 3: Synthesize consensus
-      this.messageCollector.startPhase('consensus');
-      const votingData = this.prepareVotingData(proposals, evaluations);
-      this.messageCollector.startVoting(this.config.consensusMethod, proposals.length);
-      
-      // Collect votes
-      this.collectVotes(proposals, evaluations, votingData);
-      
-      const consensus = await this.synthesizeConsensus(proposals, evaluations);
-      this.messageCollector.collectSynthesis(consensus, this.config.consensusMethod);
-      logger.info(`Consensus reached: ${consensus.finalWinner} (confidence: ${consensus.confidenceLevel})`);
+      let consensus: any;
+      let votingData: VotingData;
+      if (!unanimousWinner) {
+        // 최대 라운드 초과 시 단순 다수결
+        const counts: Record<string, number> = {};
+        for (const [, choice] of lastVotes) {
+          counts[choice] = (counts[choice] || 0) + 1;
+        }
+        const entries = Object.entries(counts);
+        entries.sort((a, b) => (b[1] - a[1]) || (a[0] < b[0] ? -1 : 1));
+        const majorityWinner = entries[0]?.[0];
+        if (!majorityWinner) {
+          throw new Error('No votes available to determine majority');
+        }
+        consensus = this.buildMajorityConsensus(majorityWinner, proposals, counts);
+        votingData = this.buildMajorityVotingData(counts);
+        this.messageCollector.collectSynthesis(consensus, 'majority');
+        logger.info(`Consensus (majority) reached: ${consensus.finalWinner}`);
+      } else {
+        // 합의 결과(만장일치) 구성
+        consensus = this.buildUnanimousConsensus(unanimousWinner, proposals);
+        votingData = this.buildUnanimousVotingData(unanimousWinner);
+        this.messageCollector.collectSynthesis(consensus, 'majority');
+        logger.info(`Consensus (unanimous) reached: ${consensus.finalWinner}`);
+      }
 
       // Create committee decision
       const endTime = Date.now();
@@ -136,7 +179,6 @@ export class CommitteeOrchestrator implements ICommitteeService {
       logger.info('Committee deliberation completed successfully', {
         contractId: input.contractId,
         winner: consensus.finalWinner,
-        confidence: consensus.confidenceLevel,
         deliberationTimeMs
       });
 
@@ -203,86 +245,149 @@ export class CommitteeOrchestrator implements ICommitteeService {
     return proposals;
   }
 
-  private async evaluateProposals(proposals: AgentProposal[]): Promise<JudgeEvaluation[]> {
-    logger.info('Starting proposal evaluation phase');
-    
-    // Rule-based evaluation
-    const ruleEvaluation = await this.judgeService.evaluateWithRules(proposals);
-    
-    // Pairwise comparisons
-    const pairwisePromises = [];
-    const pairwiseMetadata: Array<{i: number, j: number}> = [];
-    
-    for (let i = 0; i < proposals.length; i++) {
-      for (let j = i + 1; j < proposals.length; j++) {
-        pairwiseMetadata.push({i, j});
-        pairwisePromises.push(
-          this.judgeService.performPairwiseComparison(
-            proposals[i], 
-            proposals[j], 
-            this.config.judgeConfiguration.pairwiseRounds
-          )
-        );
+  private async evaluateProposals(
+    proposals: AgentProposal[],
+    input: CommitteeDeliberationInput
+  ): Promise<JudgeEvaluation[]> {
+    logger.info('Starting discussion phase (no pairwise/rule-based)');
+
+    // Group proposals by agent (anchor proposal per agent)
+    const proposalsByAgent = new Map<string, AgentProposal[]>();
+    for (const p of proposals) {
+      const list = proposalsByAgent.get(p.agentId) || [];
+      list.push(p);
+      proposalsByAgent.set(p.agentId, list);
+    }
+    const anchorByAgent = new Map<string, AgentProposal>();
+    for (const [aid, list] of proposalsByAgent.entries()) {
+      anchorByAgent.set(aid, list[0]);
+    }
+
+    // Map agentId -> agent service for re-use
+    const agentMap = new Map<string, IAgentService>();
+    this.proposerAgents.forEach(a => agentMap.set(a.agentId, a));
+
+    // Track latest stance per agent during discussion
+    const latestStance = new Map<string, { confidence: number; rationale: string }>();
+
+    const summarize = (p: AgentProposal) => ({
+      agentId: p.agentId,
+      agentName: p.agentName,
+      winner: p.winnerId,
+      confidence: p.confidence,
+      rationale: p.rationale.substring(0, 200)
+    });
+
+    const discussionRounds = Math.max(1, parseInt(process.env.DISCUSSION_ROUNDS || `${this.config.judgeConfiguration.pairwiseRounds || 2}`));
+    for (let round = 1; round <= discussionRounds; round++) {
+      logger.info('Discussion round', { round, participantCount: anchorByAgent.size });
+      for (const [agentId, anchor] of anchorByAgent.entries()) {
+        const agent = agentMap.get(agentId);
+        if (!agent) continue;
+
+        const peers = Array.from(anchorByAgent.entries())
+          .filter(([otherId]) => otherId !== agentId)
+          .map(([_, ap]) => summarize(ap));
+
+        try {
+          const updates = await agent.generateProposals(
+            {
+              contractId: input.contractId,
+              partyA: input.partyA,
+              partyB: input.partyB,
+              context: {
+                discussion: {
+                  round,
+                  peers,
+                  instruction:
+                    'You are in a live discussion with peers. Present a persuasive statement, respond to peers\' points, and state (or reinforce) your winner with rationale. Keep JSON schema.'
+                }
+              }
+            },
+            1
+          );
+
+          if (updates.length > 0) {
+            const upd = updates[0];
+            latestStance.set(agentId, { confidence: upd.confidence, rationale: upd.rationale });
+            // Update anchor to reflect current stance (including winner)
+            anchorByAgent.set(agentId, upd);
+
+            // Emit a discussion message via evaluation channel
+            const evalMsg = new JudgeEvaluation(
+              `disc_${agentId}_${round}`,
+              anchor.id,
+              'committee_discussion',
+              'Committee Discussion',
+              0,
+              {
+                completeness: 0.5,
+                consistency: 0.5,
+                evidenceQuality: 0.5,
+                clarity: anchor.getQualityScore(),
+                relevance: anchor.hasSufficientEvidence() ? 0.8 : 0.5
+              },
+              [],
+              Math.min(1, Math.max(0, upd.confidence)),
+              [upd.rationale.substring(0, 200)],
+              0.75,
+              {
+                evaluationTimeMs: 800,
+                evaluationMethod: 'discussion_statement'
+              }
+            );
+            this.messageCollector.collectEvaluation(evalMsg);
+          }
+        } catch (err) {
+          logger.warn('Discussion statement generation failed', {
+            agentId,
+            round,
+            error: err instanceof Error ? err.message : 'Unknown error'
+          });
+        }
       }
     }
 
-    const pairwiseResults = await Promise.all(pairwisePromises);
-    
-    // Collect pairwise comparison results
-    pairwiseResults.forEach((result, index) => {
-      const meta = pairwiseMetadata[index];
-      this.messageCollector.collectPairwiseComparison(
-        proposals[meta.i].id,
-        proposals[meta.j].id,
-        result.winner,
-        result.scores.A,
-        result.scores.B,
-        result.reasoning,
-        1 // Round number simplified for now
-      );
-    });
-    
-    // Generate ranking
-    const ranking = await this.judgeService.generateRanking([]);
+    // Record latest winners by agent for voting
+    this.lastAgentWinners.clear();
+    for (const [aid, ap] of anchorByAgent.entries()) {
+      this.lastAgentWinners.set(aid, ap.winnerId);
+    }
 
-    // Create evaluations for each proposal
-    const evaluations: JudgeEvaluation[] = proposals.map((proposal, index) => {
-      const proposalPairwiseResults = this.extractPairwiseResults(proposal.id, pairwiseResults, proposals);
-      
+    // Build final evaluations per original proposal using latest stance (confidence no longer used functionally)
+    const evaluations: JudgeEvaluation[] = proposals.map((proposal) => {
+      const stance = latestStance.get(proposal.agentId);
+      const overall = Math.min(1, Math.max(0, stance?.confidence ?? proposal.confidence));
       return new JudgeEvaluation(
         `eval_${proposal.id}`,
         proposal.id,
-        'committee_judge',
-        'Committee Judge',
-        ruleEvaluation.scores[proposal.id] || 0,
-        ruleEvaluation.criteria.completeness[proposal.id] ? {
-          completeness: ruleEvaluation.criteria.completeness[proposal.id] || 0,
-          consistency: ruleEvaluation.criteria.consistency[proposal.id] || 0,
-          evidenceQuality: ruleEvaluation.criteria.evidenceQuality[proposal.id] || 0,
-          clarity: proposal.getQualityScore(), // Use proposal's quality score for clarity
-          relevance: proposal.hasSufficientEvidence() ? 0.8 : 0.5
-        } : {
+        'committee_discussion_summary',
+        'Committee Discussion Summary',
+        0,
+        {
           completeness: 0.5,
           consistency: 0.5,
           evidenceQuality: 0.5,
-          clarity: 0.5,
-          relevance: 0.5
+          clarity: proposal.getQualityScore(),
+          relevance: proposal.hasSufficientEvidence() ? 0.8 : 0.5
         },
-        proposalPairwiseResults,
-        this.calculateOverallScore(ruleEvaluation.scores[proposal.id] || 0, proposalPairwiseResults),
-        [`Rule-based score: ${ruleEvaluation.scores[proposal.id] || 0}`],
-        0.8, // Default confidence
+        [],
+        overall,
+        [
+          stance?.rationale
+            ? `최종 입장(요약): ${stance.rationale.substring(0, 200)}`
+            : `최종 입장(요약): ${proposal.rationale.substring(0, 200)}`
+        ],
+        0.8,
         {
-          evaluationTimeMs: 1000, // Placeholder
-          evaluationMethod: 'rule_based_and_pairwise'
+          evaluationTimeMs: 1000,
+          evaluationMethod: 'discussion_summary'
         }
       );
     });
 
-    // Collect evaluations for visualization
-    evaluations.forEach(evaluation => {
-      this.messageCollector.collectEvaluation(evaluation);
-    });
+    // Emit the summary evaluations (one per proposal)
+    evaluations.forEach(e => this.messageCollector.collectEvaluation(e));
 
     return evaluations;
   }
@@ -293,6 +398,127 @@ export class CommitteeOrchestrator implements ICommitteeService {
   ) {
     const rankedProposals = this.rankProposalsByEvaluation(proposals, evaluations);
     return await this.synthesizerService.synthesizeConsensus(rankedProposals, evaluations);
+  }
+
+  private buildUnanimousConsensus(finalWinner: string, proposals: AgentProposal[]) {
+    // Minimal evidence: take up to 3 snippets from proposals supporting winner
+    const supporters = proposals.filter(p => p.winnerId === finalWinner);
+    const mergedEvidence = supporters.slice(0, 3).map(p => ({
+      source: p.rationale.substring(0, 200),
+      relevance: 1,
+      credibility: 1,
+      snippet: p.evidence[0] || p.rationale.substring(0, 80)
+    }));
+
+    return {
+      finalWinner,
+      confidenceLevel: 1,
+      residualUncertainty: 0,
+      mergedEvidence,
+      synthesizedReasoning: `모든 제안자가 '${finalWinner}'에 만장일치로 합의했습니다. 토의 후 진행된 투표에서 만장일치로 결정되었습니다.`,
+      methodology: 'unanimous_voting',
+      metrics: {
+        unanimityLevel: 1,
+        confidenceVariance: 0,
+        evidenceOverlap: 0,
+        reasoning: {
+          sharedPoints: [],
+          conflictingPoints: [],
+          uniqueInsights: []
+        }
+      },
+      alternativeChoices: [],
+      qualityFlags: {
+        hasMinorityDissent: false,
+        hasInsufficientEvidence: supporters.length <= 1,
+        hasConflictingEvidence: false,
+        requiresHumanReview: false
+      }
+    };
+  }
+
+  private buildMajorityConsensus(finalWinner: string, proposals: AgentProposal[], counts: Record<string, number>) {
+    const total = Object.values(counts).reduce((a, b) => a + b, 0) || 1;
+    const supporters = proposals.filter(p => p.winnerId === finalWinner);
+    const mergedEvidence = supporters.slice(0, 3).map(p => ({
+      source: p.rationale.substring(0, 200),
+      relevance: 1,
+      credibility: 1,
+      snippet: p.evidence[0] || p.rationale.substring(0, 80)
+    }));
+
+    return {
+      finalWinner,
+      confidenceLevel: 1,
+      residualUncertainty: 0,
+      mergedEvidence,
+      synthesizedReasoning: `최대 라운드 초과에 따라 단순 다수결로 '${finalWinner}'를 승자로 결정했습니다.`,
+      methodology: 'majority',
+      metrics: {
+        unanimityLevel: (counts[finalWinner] || 0) / total,
+        confidenceVariance: 0,
+        evidenceOverlap: 0,
+        reasoning: {
+          sharedPoints: [],
+          conflictingPoints: [],
+          uniqueInsights: []
+        }
+      },
+      alternativeChoices: [],
+      qualityFlags: {
+        hasMinorityDissent: (counts[finalWinner] || 0) < total,
+        hasInsufficientEvidence: supporters.length <= 1,
+        hasConflictingEvidence: false,
+        requiresHumanReview: false
+      }
+    };
+  }
+
+  private buildMajorityVotingData(counts: Record<string, number>): VotingData {
+    const total = Object.values(counts).reduce((a, b) => a + b, 0) || 1;
+    const distribution: Record<string, number> = {};
+    Object.entries(counts).forEach(([k, v]) => {
+      distribution[k] = v / total;
+    });
+    const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
+    const winner = sorted[0][0];
+    const margin = (sorted[0][1] - (sorted[1]?.[1] || 0)) / total;
+    const votes = this.proposerAgents.map(a => ({
+      agentId: a.agentId,
+      agentName: a.agentName,
+      choice: winner, // visualization aggregates; per-agent choices already streamed as vote messages
+      confidence: 1,
+      weight: 1,
+      contribution: 1
+    }));
+    return {
+      method: 'majority',
+      votes,
+      distribution,
+      winner,
+      margin,
+      totalWeight: total
+    };
+  }
+  private buildUnanimousVotingData(winner: string): VotingData {
+    const votes = this.proposerAgents.map(a => ({
+      agentId: a.agentId,
+      agentName: a.agentName,
+      choice: winner,
+      confidence: 1,
+      weight: 1,
+      contribution: 1
+    }));
+    const distribution: Record<string, number> = {};
+    distribution[winner] = 1;
+    return {
+      method: 'majority',
+      votes,
+      distribution,
+      winner,
+      margin: 1,
+      totalWeight: votes.length
+    };
   }
 
   private shouldEarlyExit(evaluations: JudgeEvaluation[], threshold: number): boolean {

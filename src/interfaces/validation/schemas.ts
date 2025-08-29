@@ -105,10 +105,10 @@ export const deliberationQuerySchema = Joi.object({
       'number.max': 'Limit cannot exceed 200'
     }),
   phase: Joi.string()
-    .valid('proposing', 'judging', 'consensus', 'completed')
+    .valid('proposing', 'discussion', 'consensus', 'completed')
     .optional()
     .messages({
-      'any.only': 'Phase must be one of: proposing, judging, consensus, completed'
+      'any.only': 'Phase must be one of: proposing, discussion, consensus, completed'
     }),
   agentId: Joi.string()
     .pattern(/^[a-zA-Z0-9_-]+$/)
