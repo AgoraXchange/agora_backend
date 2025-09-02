@@ -106,7 +106,7 @@ describe('Deliberation Visualization Integration', () => {
         ['High completeness score', 'Good consistency']
       );
 
-      expect(message.phase).toBe('judging');
+      expect(message.phase).toBe('discussion');
       expect(message.messageType).toBe('evaluation');
       expect(message.content.scores?.completeness).toBe(0.9);
       expect(message.content.reasoning).toContain('High completeness score');
@@ -123,7 +123,7 @@ describe('Deliberation Visualization Integration', () => {
         2
       );
 
-      expect(message.phase).toBe('judging');
+      expect(message.phase).toBe('discussion');
       expect(message.messageType).toBe('comparison');
       expect(message.content.winner).toBe('A');
       expect(message.content.scores?.A).toBe(0.82);

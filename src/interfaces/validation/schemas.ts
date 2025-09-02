@@ -105,10 +105,10 @@ export const deliberationQuerySchema = Joi.object({
       'number.max': 'Limit cannot exceed 200'
     }),
   phase: Joi.string()
-    .valid('proposing', 'judging', 'consensus', 'completed')
+    .valid('proposing', 'discussion', 'consensus', 'completed')
     .optional()
     .messages({
-      'any.only': 'Phase must be one of: proposing, judging, consensus, completed'
+      'any.only': 'Phase must be one of: proposing, discussion, consensus, completed'
     }),
   agentId: Joi.string()
     .pattern(/^[a-zA-Z0-9_-]+$/)
@@ -159,4 +159,37 @@ export const getDeliberationMessagesSchema = Joi.object({
 
 export const exportDeliberationSchema = Joi.object({
   params: deliberationParamsSchema
+});
+
+// Frontend-ended notification schema
+export const endedNotificationSchema = Joi.object({
+  params: Joi.object({
+    contractId: Joi.string()
+      .pattern(/^\d+$/)
+      .required()
+      .messages({
+        'string.pattern.base': 'Contract ID in path must be a numeric string'
+      })
+  }),
+  body: Joi.object({
+    contractId: Joi.number().integer().required(),
+    endedAt: Joi.string().isoDate().required(),
+    bettingEndTime: Joi.number().integer().required(), // seconds
+    chainId: Joi.number().integer().required()
+  })
+});
+
+// Winner arguments fetch schema (public)
+export const getWinnerArgumentsSchema = Joi.object({
+  params: Joi.object({
+    contractId: Joi.string()
+      .pattern(/^\d+$/)
+      .required()
+      .messages({
+        'string.pattern.base': 'Contract ID in path must be a numeric string'
+      })
+  }),
+  query: Joi.object({
+    lang: Joi.string().valid('ko', 'en').optional()
+  }).optional()
 });

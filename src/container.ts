@@ -28,6 +28,7 @@ import { ConsensusSynthesizer } from './infrastructure/committee/synthesizer/Con
 import { MessageCollector } from './infrastructure/committee/MessageCollector';
 import { DeliberationEventEmitter } from './infrastructure/committee/events/DeliberationEventEmitter';
 import { DeliberationVisualizationController } from './interfaces/controllers/DeliberationVisualizationController';
+import { DecisionCoordinator } from './infrastructure/coordination/DecisionCoordinator';
 
 const container = new Container();
 
@@ -37,16 +38,16 @@ container.bind<MongoDBConnection>('MongoDBConnection').to(MongoDBConnection).inS
 // Repositories - Use MongoDB in production, InMemory for testing
 const useMongoDB = process.env.USE_MONGODB === 'true';
 if (useMongoDB) {
-  container.bind<IContractRepository>('IContractRepository').to(MongoContractRepository);
-  container.bind<IOracleDecisionRepository>('IOracleDecisionRepository').to(MongoOracleDecisionRepository);
+  container.bind<IContractRepository>('IContractRepository').to(MongoContractRepository).inSingletonScope();
+  container.bind<IOracleDecisionRepository>('IOracleDecisionRepository').to(MongoOracleDecisionRepository).inSingletonScope();
 } else {
-  container.bind<IContractRepository>('IContractRepository').to(InMemoryContractRepository);
-  container.bind<IOracleDecisionRepository>('IOracleDecisionRepository').to(InMemoryOracleDecisionRepository);
+  container.bind<IContractRepository>('IContractRepository').to(InMemoryContractRepository).inSingletonScope();
+  container.bind<IOracleDecisionRepository>('IOracleDecisionRepository').to(InMemoryOracleDecisionRepository).inSingletonScope();
 }
 
 // Services
 container.bind<IAIService>('IAIService').to(OpenAIService);
-container.bind<IBlockchainService>('IBlockchainService').to(EthereumService);
+container.bind<IBlockchainService>('IBlockchainService').to(EthereumService).inSingletonScope();
 container.bind<JwtService>('JwtService').to(JwtService);
 container.bind<CryptoService>('CryptoService').to(CryptoService);
 
@@ -59,6 +60,9 @@ container.bind<ISynthesizerService>('SynthesizerService').to(ConsensusSynthesize
 container.bind<DeliberationEventEmitter>('DeliberationEventEmitter').to(DeliberationEventEmitter).inSingletonScope();
 container.bind<MessageCollector>('MessageCollector').to(MessageCollector);
 container.bind<DeliberationVisualizationController>('DeliberationVisualizationController').to(DeliberationVisualizationController);
+
+// Coordination
+container.bind<DecisionCoordinator>('DecisionCoordinator').to(DecisionCoordinator).inSingletonScope();
 
 // Proposer Agents - Always bind all agents, filtering will be done at runtime
 container.bind<IAgentService>('GPT5Proposer').to(GPT5Proposer);

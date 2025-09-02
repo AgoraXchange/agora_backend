@@ -1,9 +1,9 @@
 import { injectable, inject } from 'inversify';
-import { 
-  ICommitteeService, 
-  CommitteeDeliberationInput, 
+import {
+  ICommitteeService,
+  CommitteeDeliberationInput,
   CommitteeDeliberationResult,
-  CommitteeConfiguration 
+  CommitteeConfiguration
 } from '../../domain/services/ICommitteeService';
 import { IAgentService } from '../../domain/services/IAgentService';
 import { IJudgeService, ISynthesizerService } from '../../domain/services/IAgentService';
@@ -13,12 +13,15 @@ import { JudgeEvaluation } from '../../domain/entities/JudgeEvaluation';
 import { MessageCollector } from './MessageCollector';
 import { VotingData } from '../../domain/valueObjects/DeliberationVisualization';
 import { logger } from '../logging/Logger';
+import { ConsensusResult as ConsensusResultEntity, EvidenceSource } from '../../domain/valueObjects/ConsensusResult';
 
 @injectable()
 export class CommitteeOrchestrator implements ICommitteeService {
   private agentWeights: Record<string, number> = {};
   private config: CommitteeConfiguration;
   private currentDeliberationId?: string;
+  private lastAgentWinners: Map<string, string> = new Map();
+  private lastUpdatedProposals: AgentProposal[] = [];
 
   constructor(
     @inject('ProposerAgents') private proposerAgents: IAgentService[],
@@ -52,91 +55,134 @@ export class CommitteeOrchestrator implements ICommitteeService {
       this.messageCollector.completeProposalPhase(proposals);
       logger.info(`Generated ${proposals.length} proposals from ${this.proposerAgents.length} agents`);
 
-      // Phase 2: Judge and evaluate proposals
-      this.messageCollector.startPhase('judging');
-      const evaluations = await this.evaluateProposals(proposals);
-      this.messageCollector.completeJudgmentPhase(evaluations);
-      logger.info(`Completed ${evaluations.length} evaluations`);
+      // Phases 2 & 3: Discussion → Voting (repeat) with unanimity-first
+      let unanimousWinner: string | null = null;
+      const maxRounds = Math.max(1, parseInt(process.env.UNANIMOUS_MAX_ROUNDS || '10'));
+      const agentNameMap = new Map<string, string>(this.proposerAgents.map(a => [a.agentId, a.agentName]));
+      let lastVotes: Array<[string, string]> = [];
 
-      // Check for early exit
-      if (input.enableEarlyExit && this.shouldEarlyExit(evaluations, input.consensusThreshold || 0.8)) {
-        logger.info('Early exit triggered due to strong consensus');
+      let evaluations: JudgeEvaluation[] = [];
+      for (let round = 1; round <= maxRounds; round++) {
+        // Discussion round
+        this.messageCollector.startPhase('discussion');
+        evaluations = await this.evaluateProposals(proposals, input);
+        this.messageCollector.completeJudgmentPhase(evaluations);
+        logger.info(`Discussion round ${round} completed`);
+
+        // Voting based on latest agent winner stances
+        this.messageCollector.startVoting('majority', this.proposerAgents.length);
+        const winners = Array.from(this.lastAgentWinners.entries());
+        lastVotes = winners;
+        const uniqueChoices = new Set<string>(winners.map(([_, w]) => w));
+
+        winners.forEach(([agentId, choice]) => {
+          const name = agentNameMap.get(agentId) || agentId;
+          this.messageCollector.collectVote(agentId, name, choice, 1, 1, 1);
+        });
+
+        if (uniqueChoices.size === 1) {
+          unanimousWinner = winners[0]?.[1] || null;
+          logger.info('Unanimity achieved', { winner: unanimousWinner, round });
+          break;
+        } else {
+          logger.info('Unanimity not reached, continuing discussion', {
+            round,
+            choices: Array.from(uniqueChoices.values())
+          });
+          continue;
+        }
       }
 
-      // Phase 3: Synthesize consensus
-      this.messageCollector.startPhase('consensus');
-      const votingData = this.prepareVotingData(proposals, evaluations);
-      this.messageCollector.startVoting(this.config.consensusMethod, proposals.length);
-      
-      // Collect votes
-      this.collectVotes(proposals, evaluations, votingData);
-      
-      const consensus = await this.synthesizeConsensus(proposals, evaluations);
-      this.messageCollector.collectSynthesis(consensus, this.config.consensusMethod);
-      logger.info(`Consensus reached: ${consensus.finalWinner} (confidence: ${consensus.confidenceLevel})`);
+      // Use latest updated proposals if available (from discussion anchors)
+      const finalProposals: AgentProposal[] = (this.lastUpdatedProposals && this.lastUpdatedProposals.length > 0)
+        ? [...this.lastUpdatedProposals]
+        : proposals;
+
+      // Build consensus result (entity) and voting visualization
+      let consensusEntity: ConsensusResultEntity;
+      let votingData: VotingData;
+      if (!unanimousWinner) {
+        // Majority fallback
+        const counts: Record<string, number> = {};
+        for (const [, choice] of lastVotes) {
+          counts[choice] = (counts[choice] || 0) + 1;
+        }
+        const entries = Object.entries(counts).sort((a, b) => (b[1] - a[1]) || (a[0] < b[0] ? -1 : 1));
+        const majorityWinner = entries[0]?.[0];
+        if (!majorityWinner) {
+          throw new Error('No votes available to determine majority');
+        }
+        consensusEntity = this.buildMajorityConsensus(majorityWinner, finalProposals, counts);
+        votingData = this.buildMajorityVotingData(counts);
+        this.messageCollector.collectSynthesis(consensusEntity, 'majority');
+        logger.info(`Consensus (majority) reached: ${consensusEntity.finalWinner}`);
+      } else {
+        // Unanimous consensus
+        consensusEntity = this.buildUnanimousConsensus(unanimousWinner, finalProposals);
+        votingData = this.buildUnanimousVotingData(unanimousWinner);
+        this.messageCollector.collectSynthesis(consensusEntity, 'majority');
+        logger.info(`Consensus (unanimous) reached: ${consensusEntity.finalWinner}`);
+      }
 
       // Create committee decision
       const endTime = Date.now();
       const deliberationTimeMs = endTime - startTime;
-      
+
       const committeeDecision = this.createCommitteeDecision(
         input.contractId,
-        consensus.finalWinner,
-        proposals,
+        consensusEntity.finalWinner,
+        finalProposals,
         evaluations,
-        consensus,
+        consensusEntity,
         deliberationTimeMs,
         startTime
       );
 
       // Complete deliberation and build visualization
       this.messageCollector.completeDeliberation(
-        consensus.finalWinner,
+        consensusEntity.finalWinner,
         committeeDecision.id,
         {
-          totalProposals: proposals.length,
+          totalProposals: finalProposals.length,
           totalComparisons: evaluations.length,
-          consensusLevel: consensus.metrics.unanimityLevel,
-          totalCost: this.calculateCostBreakdown(proposals, evaluations).totalCostUSD
+          consensusLevel: consensusEntity.metrics.unanimityLevel,
+          totalCost: this.calculateCostBreakdown(finalProposals, evaluations).totalCostUSD
         }
       );
 
-      // Build complete visualization data
       const visualization = this.messageCollector.buildVisualization(
-        proposals,
+        finalProposals,
         evaluations,
-        consensus,
+        consensusEntity,
         votingData,
         committeeDecision.id
       );
 
       // Update agent weights based on performance
-      this.updateAgentPerformance(proposals, evaluations, consensus.finalWinner);
+      this.updateAgentPerformance(finalProposals, evaluations, consensusEntity.finalWinner);
 
       const result: CommitteeDeliberationResult = {
-        winnerId: consensus.finalWinner,
+        winnerId: consensusEntity.finalWinner,
         metadata: {
-          confidence: consensus.confidenceLevel,
-          reasoning: consensus.synthesizedReasoning,
-          dataPoints: consensus.mergedEvidence.map(e => e.source),
+          confidence: consensusEntity.confidenceLevel,
+          reasoning: consensusEntity.synthesizedReasoning,
+          dataPoints: consensusEntity.mergedEvidence.map(e => e.source),
           timestamp: new Date()
         },
         committeeDecision,
         deliberationMetrics: {
-          totalProposals: proposals.length,
+          totalProposals: finalProposals.length,
           deliberationTimeMs,
-          consensusLevel: consensus.metrics.unanimityLevel,
-          costBreakdown: this.calculateCostBreakdown(proposals, evaluations)
+          consensusLevel: consensusEntity.metrics.unanimityLevel,
+          costBreakdown: this.calculateCostBreakdown(finalProposals, evaluations)
         },
-        // Add visualization data to result
         visualization,
         messages: this.messageCollector.getMessages()
       };
 
       logger.info('Committee deliberation completed successfully', {
         contractId: input.contractId,
-        winner: consensus.finalWinner,
-        confidence: consensus.confidenceLevel,
+        winner: consensusEntity.finalWinner,
         deliberationTimeMs
       });
 
@@ -174,7 +220,7 @@ export class CommitteeOrchestrator implements ICommitteeService {
           contractId: input.contractId,
           partyA: input.partyA,
           partyB: input.partyB,
-          context: input.context
+          context: input.additionalContext
         }, maxProposalsPerAgent);
 
         // Collect each proposal for visualization
@@ -203,96 +249,272 @@ export class CommitteeOrchestrator implements ICommitteeService {
     return proposals;
   }
 
-  private async evaluateProposals(proposals: AgentProposal[]): Promise<JudgeEvaluation[]> {
-    logger.info('Starting proposal evaluation phase');
-    
-    // Rule-based evaluation
-    const ruleEvaluation = await this.judgeService.evaluateWithRules(proposals);
-    
-    // Pairwise comparisons
-    const pairwisePromises = [];
-    const pairwiseMetadata: Array<{i: number, j: number}> = [];
-    
-    for (let i = 0; i < proposals.length; i++) {
-      for (let j = i + 1; j < proposals.length; j++) {
-        pairwiseMetadata.push({i, j});
-        pairwisePromises.push(
-          this.judgeService.performPairwiseComparison(
-            proposals[i], 
-            proposals[j], 
-            this.config.judgeConfiguration.pairwiseRounds
-          )
-        );
+  private async evaluateProposals(
+    proposals: AgentProposal[],
+    input: CommitteeDeliberationInput
+  ): Promise<JudgeEvaluation[]> {
+    logger.info('Starting discussion phase');
+
+    // Group proposals by agent and pick an anchor proposal per agent
+    const proposalsByAgent = new Map<string, AgentProposal[]>();
+    for (const p of proposals) {
+      const list = proposalsByAgent.get(p.agentId) || [];
+      list.push(p);
+      proposalsByAgent.set(p.agentId, list);
+    }
+    const anchorByAgent = new Map<string, AgentProposal>();
+    for (const [aid, list] of proposalsByAgent.entries()) {
+      anchorByAgent.set(aid, list[0]);
+    }
+
+    // Map agentId -> agent service
+    const agentMap = new Map<string, IAgentService>();
+    this.proposerAgents.forEach(a => agentMap.set(a.agentId, a));
+
+    // Track latest stance per agent during discussion
+    const latestStance = new Map<string, { confidence: number; rationale: string }>();
+
+    const summarize = (p: AgentProposal) => ({
+      agentId: p.agentId,
+      agentName: p.agentName,
+      winner: p.winnerId,
+      confidence: p.confidence,
+      rationale: p.rationale.substring(0, 200)
+    });
+
+    const discussionRounds = Math.max(
+      1,
+      parseInt(process.env.DISCUSSION_ROUNDS || `${this.config.judgeConfiguration.pairwiseRounds || 2}`)
+    );
+    for (let round = 1; round <= discussionRounds; round++) {
+      logger.info('Discussion round', { round, participantCount: anchorByAgent.size });
+      for (const [agentId, anchor] of anchorByAgent.entries()) {
+        const agent = agentMap.get(agentId);
+        if (!agent) continue;
+
+        const peers = Array.from(anchorByAgent.entries())
+          .filter(([otherId]) => otherId !== agentId)
+          .map(([_, ap]) => summarize(ap));
+
+        try {
+          const updates = await agent.generateProposals(
+            {
+              contractId: input.contractId,
+              partyA: input.partyA,
+              partyB: input.partyB,
+              context: {
+                discussion: {
+                  round,
+                  peers,
+                  instruction:
+                    "You are in a live discussion with peers. Present a persuasive statement, respond to peers' points, and state (or reinforce) your winner with rationale. Keep JSON schema."
+                }
+              }
+            },
+            1
+          );
+
+          if (updates.length > 0) {
+            const upd = updates[0];
+            latestStance.set(agentId, { confidence: upd.confidence, rationale: upd.rationale });
+            // Update anchor to reflect current stance (including winner)
+            anchorByAgent.set(agentId, upd);
+
+            // Emit a discussion evaluation message
+            const evalMsg = new JudgeEvaluation(
+              `disc_${agentId}_${round}`,
+              anchor.id,
+              'committee_discussion',
+              'Committee Discussion',
+              0,
+              {
+                completeness: 0.5,
+                consistency: 0.5,
+                evidenceQuality: 0.5,
+                clarity: anchor.getQualityScore(),
+                relevance: anchor.hasSufficientEvidence() ? 0.8 : 0.5
+              },
+              [],
+              Math.min(1, Math.max(0, upd.confidence)),
+              [upd.rationale.substring(0, 200)],
+              0.75,
+              {
+                evaluationTimeMs: 800,
+                evaluationMethod: 'discussion_statement'
+              }
+            );
+            this.messageCollector.collectEvaluation(evalMsg);
+          }
+        } catch (err) {
+          logger.warn('Discussion statement generation failed', {
+            agentId,
+            round,
+            error: err instanceof Error ? err.message : 'Unknown error'
+          });
+        }
       }
     }
 
-    const pairwiseResults = await Promise.all(pairwisePromises);
-    
-    // Collect pairwise comparison results
-    pairwiseResults.forEach((result, index) => {
-      const meta = pairwiseMetadata[index];
-      this.messageCollector.collectPairwiseComparison(
-        proposals[meta.i].id,
-        proposals[meta.j].id,
-        result.winner,
-        result.scores.A,
-        result.scores.B,
-        result.reasoning,
-        1 // Round number simplified for now
-      );
-    });
-    
-    // Generate ranking
-    const ranking = await this.judgeService.generateRanking([]);
+    // Record latest winners by agent for voting
+    this.lastAgentWinners.clear();
+    for (const [aid, ap] of anchorByAgent.entries()) {
+      this.lastAgentWinners.set(aid, ap.winnerId);
+    }
+    // Persist latest updated proposals for final decision/evidence
+    this.lastUpdatedProposals = Array.from(anchorByAgent.values());
 
-    // Create evaluations for each proposal
-    const evaluations: JudgeEvaluation[] = proposals.map((proposal, index) => {
-      const proposalPairwiseResults = this.extractPairwiseResults(proposal.id, pairwiseResults, proposals);
-      
+    // Build final evaluations per original proposal using latest stance
+    const evaluations: JudgeEvaluation[] = proposals.map((proposal) => {
+      const stance = latestStance.get(proposal.agentId);
+      const overall = Math.min(1, Math.max(0, stance?.confidence ?? proposal.confidence));
       return new JudgeEvaluation(
         `eval_${proposal.id}`,
         proposal.id,
-        'committee_judge',
-        'Committee Judge',
-        ruleEvaluation.scores[proposal.id] || 0,
-        ruleEvaluation.criteria.completeness[proposal.id] ? {
-          completeness: ruleEvaluation.criteria.completeness[proposal.id] || 0,
-          consistency: ruleEvaluation.criteria.consistency[proposal.id] || 0,
-          evidenceQuality: ruleEvaluation.criteria.evidenceQuality[proposal.id] || 0,
-          clarity: proposal.getQualityScore(), // Use proposal's quality score for clarity
-          relevance: proposal.hasSufficientEvidence() ? 0.8 : 0.5
-        } : {
+        'committee_discussion_summary',
+        'Committee Discussion Summary',
+        0,
+        {
           completeness: 0.5,
           consistency: 0.5,
           evidenceQuality: 0.5,
-          clarity: 0.5,
-          relevance: 0.5
+          clarity: proposal.getQualityScore(),
+          relevance: proposal.hasSufficientEvidence() ? 0.8 : 0.5
         },
-        proposalPairwiseResults,
-        this.calculateOverallScore(ruleEvaluation.scores[proposal.id] || 0, proposalPairwiseResults),
-        [`Rule-based score: ${ruleEvaluation.scores[proposal.id] || 0}`],
-        0.8, // Default confidence
+        [],
+        overall,
+        ['Latest stance consolidated after discussion'],
+        0.75,
         {
-          evaluationTimeMs: 1000, // Placeholder
-          evaluationMethod: 'rule_based_and_pairwise'
+          evaluationTimeMs: 1000,
+          evaluationMethod: 'discussion_summary'
         }
       );
     });
 
-    // Collect evaluations for visualization
-    evaluations.forEach(evaluation => {
-      this.messageCollector.collectEvaluation(evaluation);
-    });
-
+    evaluations.forEach(e => this.messageCollector.collectEvaluation(e));
     return evaluations;
   }
 
-  private async synthesizeConsensus(
-    proposals: AgentProposal[], 
-    evaluations: JudgeEvaluation[]
-  ) {
-    const rankedProposals = this.rankProposalsByEvaluation(proposals, evaluations);
-    return await this.synthesizerService.synthesizeConsensus(rankedProposals, evaluations);
+  // Build unanimous consensus entity
+  private buildUnanimousConsensus(finalWinner: string, proposals: AgentProposal[]): ConsensusResultEntity {
+    const supporters = proposals.filter(p => p.winnerId === finalWinner);
+    const mergedEvidence: EvidenceSource[] = supporters.slice(0, 3).map(p => ({
+      source: p.rationale.substring(0, 200),
+      relevance: 1,
+      credibility: 1,
+      snippet: p.evidence[0] || p.rationale.substring(0, 80)
+    }));
+
+    return new ConsensusResultEntity(
+      finalWinner,
+      1,
+      0,
+      mergedEvidence,
+      `모든 참여자가 '${finalWinner}'로 만장일치하여 승자를 결정했습니다.`,
+      'majority',
+      {
+        unanimityLevel: 1,
+        confidenceVariance: 0,
+        evidenceOverlap: 0,
+        reasoning: {
+          sharedPoints: [],
+          conflictingPoints: [],
+          uniqueInsights: []
+        }
+      },
+      [],
+      {
+        hasMinorityDissent: false,
+        hasInsufficientEvidence: supporters.length <= 1,
+        hasConflictingEvidence: false,
+        requiresHumanReview: false
+      }
+    );
+  }
+
+  // Build majority consensus entity
+  private buildMajorityConsensus(finalWinner: string, proposals: AgentProposal[], counts: Record<string, number>): ConsensusResultEntity {
+    const total = Object.values(counts).reduce((a, b) => a + b, 0) || 1;
+    const supporters = proposals.filter(p => p.winnerId === finalWinner);
+    const mergedEvidence: EvidenceSource[] = supporters.slice(0, 3).map(p => ({
+      source: p.rationale.substring(0, 200),
+      relevance: 1,
+      credibility: 1,
+      snippet: p.evidence[0] || p.rationale.substring(0, 80)
+    }));
+
+    return new ConsensusResultEntity(
+      finalWinner,
+      1,
+      0,
+      mergedEvidence,
+      `최대 라운드 초과에 따라 단순 다수결로 '${finalWinner}'를 승자로 결정했습니다.`,
+      'majority',
+      {
+        unanimityLevel: (counts[finalWinner] || 0) / total,
+        confidenceVariance: 0,
+        evidenceOverlap: 0,
+        reasoning: {
+          sharedPoints: [],
+          conflictingPoints: [],
+          uniqueInsights: []
+        }
+      },
+      [],
+      {
+        hasMinorityDissent: (counts[finalWinner] || 0) < total,
+        hasInsufficientEvidence: supporters.length <= 1,
+        hasConflictingEvidence: false,
+        requiresHumanReview: false
+      }
+    );
+  }
+
+  private buildUnanimousVotingData(winner: string): VotingData {
+    const votes = this.proposerAgents.map(a => ({
+      agentId: a.agentId,
+      agentName: a.agentName,
+      choice: winner,
+      confidence: 1,
+      weight: 1,
+      contribution: 1
+    }));
+    const distribution: Record<string, number> = { [winner]: 1 };
+    return {
+      method: 'majority',
+      votes,
+      distribution,
+      winner,
+      margin: 1,
+      totalWeight: votes.length
+    };
+  }
+
+  private buildMajorityVotingData(counts: Record<string, number>): VotingData {
+    const total = Object.values(counts).reduce((a, b) => a + b, 0) || 1;
+    const distribution: Record<string, number> = {};
+    Object.entries(counts).forEach(([k, v]) => {
+      distribution[k] = v / total;
+    });
+    const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
+    const winner = sorted[0][0];
+    const margin = (sorted[0][1] - (sorted[1]?.[1] || 0)) / total;
+    const votes = this.proposerAgents.map(a => ({
+      agentId: a.agentId,
+      agentName: a.agentName,
+      choice: winner,
+      confidence: 1,
+      weight: 1,
+      contribution: 1
+    }));
+    return {
+      method: 'majority',
+      votes,
+      distribution,
+      winner,
+      margin,
+      totalWeight: total
+    };
   }
 
   private shouldEarlyExit(evaluations: JudgeEvaluation[], threshold: number): boolean {
@@ -441,34 +663,48 @@ export class CommitteeOrchestrator implements ICommitteeService {
     proposals: AgentProposal[], 
     evaluations: JudgeEvaluation[]
   ): VotingData {
-    const evaluationMap = new Map(evaluations.map(e => [e.proposalId, e]));
+    // Equal-weight voting: one vote per participant (agent). If an agent made
+    // multiple proposals, pick the best one by proposal quality score (fallback
+    // to confidence) and cast a single vote for that choice.
     const votes: VotingData['votes'] = [];
     const distribution: Record<string, number> = {};
     let totalWeight = 0;
 
-    // Create vote entries for each proposal (representing agent votes)
-    proposals.forEach(proposal => {
-      const evaluation = evaluationMap.get(proposal.id);
-      const weight = this.agentWeights[proposal.agentId] || 1.0;
-      const evaluationScore = evaluation?.overallScore || 0.5;
-      const confidence = proposal.confidence;
-      
-      // Calculate weighted contribution
-      const contribution = weight * evaluationScore * confidence;
-      
+    // Group proposals by agent
+    const byAgent = new Map<string, AgentProposal[]>();
+    proposals.forEach(p => {
+      const arr = byAgent.get(p.agentId) || [];
+      arr.push(p);
+      byAgent.set(p.agentId, arr);
+    });
+
+    // Select best proposal per agent
+    for (const [agentId, arr] of byAgent.entries()) {
+      let best = arr[0];
+      let bestScore = best.getQualityScore();
+      for (let i = 1; i < arr.length; i++) {
+        const s = arr[i].getQualityScore();
+        if (s > bestScore || (s === bestScore && arr[i].confidence > best.confidence)) {
+          best = arr[i];
+          bestScore = s;
+        }
+      }
+
+      // Cast one equal-weight vote per agent
+      const weight = 1;
+      const contribution = 1;
       votes.push({
-        agentId: proposal.agentId,
-        agentName: proposal.agentName,
-        choice: proposal.winnerId,
-        confidence,
+        agentId,
+        agentName: best.agentName,
+        choice: best.winnerId,
+        confidence: best.confidence,
         weight,
         contribution
       });
 
-      // Accumulate distribution
-      distribution[proposal.winnerId] = (distribution[proposal.winnerId] || 0) + contribution;
-      totalWeight += contribution;
-    });
+      distribution[best.winnerId] = (distribution[best.winnerId] || 0) + 1;
+      totalWeight += 1;
+    }
 
     // Normalize distribution to percentages
     Object.keys(distribution).forEach(choice => {

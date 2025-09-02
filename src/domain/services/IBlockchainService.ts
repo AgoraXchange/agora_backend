@@ -16,6 +16,15 @@ export interface ContractData {
 }
 
 export interface IBlockchainService {
+  // On-chain role helpers
+  getSignerAddress(): string;
+  getOracleAddress(): Promise<string>;
+  isAuthorizedOracle(): Promise<boolean>;
+
+  closeBetting(
+    contractId: string
+  ): Promise<string>;
+
   declareWinner(
     contractId: string,
     winner: Choice
