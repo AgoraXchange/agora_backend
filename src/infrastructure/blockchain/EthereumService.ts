@@ -1,5 +1,6 @@
 import { injectable, inject } from 'inversify';
 import { ethers } from 'ethers';
+import fs from 'fs';
 import { IBlockchainService, ContractData } from '../../domain/services/IBlockchainService';
 import { Choice } from '../../domain/entities/Choice';
 import { BettingStats, ContractEventData, BetPlacedEvent, BetRevealedEvent } from '../../domain/entities/BettingStats';
@@ -43,10 +44,15 @@ export class EthereumService implements IBlockchainService {
       }
     }
     
+    // Default minimal ABI (overridable via env)
     this.contractABI = [
       "function declareWinner(uint256 _contractId, uint8 _winner) external",
-      "function getContract(uint256 _contractId) external view returns (address creator, string memory partyA, string memory partyB, uint256 bettingEndTime, uint8 status, uint8 winner, uint256 totalPoolA, uint256 totalPoolB, uint256 partyRewardPercentage)",
       "function closeBetting(uint256 _contractId) external",
+      // Split views per deployed contract
+      "function getContractBasic(uint256 _contractId) external view returns (address creator, string topic, string partyA, string partyB, uint256 bettingEndTime, uint8 status)",
+      "function getContractBetting(uint256 _contractId) external view returns (uint8 winner, uint256 totalPoolA, uint256 totalPoolB, uint256 partyRewardPercentage, uint256 minBetAmount, uint256 maxBetAmount, uint256 totalBettors)",
+      // Fallback: full struct return (if available)
+      "function getContract(uint256 _contractId) external view returns ((address creator, string topic, string description, string partyA, string partyB, uint256 bettingEndTime, uint8 status, uint8 winner, uint256 totalPoolA, uint256 totalPoolB, uint256 partyRewardPercentage, uint256 minBetAmount, uint256 maxBetAmount, uint256 totalBettors, uint256 totalComments))",
       "function placeBet(uint256 _contractId, uint8 _choice) external payable",
       "function getUserBets(uint256 _contractId, address _user) external view returns (uint256[] memory amounts, uint8[] memory choices, bool[] memory claimed)",
       "event ContractCreated(uint256 indexed contractId, address indexed creator, string topic, string description, string partyA, string partyB, uint256 bettingEndTime)",
@@ -55,6 +61,92 @@ export class EthereumService implements IBlockchainService {
       "event RewardsDistributed(uint256 indexed contractId, uint256 partyReward, uint256 totalDistributed)",
       "event RewardClaimed(uint256 indexed contractId, address indexed bettor, uint256 amount)"
     ];
+
+    // Optional: override ABI from env (path or inline JSON)
+    try {
+      const abiJsonInline = process.env.MAIN_CONTRACT_ABI_JSON;
+      const abiJsonPath = process.env.MAIN_CONTRACT_ABI_PATH;
+      if (abiJsonInline && abiJsonInline.trim().length > 0) {
+        this.contractABI = JSON.parse(abiJsonInline);
+        logger.info('Loaded main contract ABI from MAIN_CONTRACT_ABI_JSON');
+      } else if (abiJsonPath && fs.existsSync(abiJsonPath)) {
+        const content = fs.readFileSync(abiJsonPath, 'utf-8');
+        this.contractABI = JSON.parse(content);
+        logger.info('Loaded main contract ABI from MAIN_CONTRACT_ABI_PATH', { abiPath: abiJsonPath });
+      }
+    } catch (abiErr) {
+      logger.warn('Failed to load ABI override; falling back to default minimal ABI', {
+        error: abiErr instanceof Error ? abiErr.message : 'Unknown error'
+      });
+    }
+  }
+
+  getSignerAddress(): string {
+    if (!this.wallet) throw new Error('Wallet not initialized');
+    return this.wallet.address;
+  }
+
+  private async getOnChainOracleAddress(): Promise<string> {
+    const mainContractAddress = process.env.MAIN_CONTRACT_ADDRESS;
+    if (!mainContractAddress) throw new Error('Main contract address not configured');
+    const contract = new ethers.Contract(mainContractAddress, [
+      "function oracle() view returns (address)"
+    ], this.provider);
+    return await contract.oracle();
+  }
+
+  async getOracleAddress(): Promise<string> {
+    return await this.getOnChainOracleAddress();
+  }
+
+  async isAuthorizedOracle(): Promise<boolean> {
+    try {
+      const signer = this.getSignerAddress().toLowerCase();
+      const onchain = (await this.getOnChainOracleAddress()).toLowerCase();
+      return signer === onchain;
+    } catch {
+      // If we cannot verify, allow to proceed to avoid false negatives
+      return true;
+    }
+  }
+
+  async closeBetting(contractId: string): Promise<string> {
+    if (this.mockMode) {
+      logger.info('🎭 MOCK: Simulating closeBetting on blockchain', { contractId });
+      return `0xmockclose${Date.now().toString(16)}`;
+    }
+
+    if (!this.wallet) {
+      throw new Error('Wallet not initialized');
+    }
+
+    try {
+      const contractAddress = process.env.MAIN_CONTRACT_ADDRESS;
+      if (!contractAddress) {
+        throw new Error('Main contract address not configured');
+      }
+
+      const contract = new ethers.Contract(contractAddress, this.contractABI, this.wallet);
+      const tx = await contract.closeBetting(contractId);
+      const receipt = await tx.wait();
+
+      logger.info('Betting closed on blockchain', {
+        contractId,
+        transactionHash: receipt.hash
+      });
+
+      return receipt.hash;
+    } catch (error) {
+      let onchainOracle: string | undefined;
+      try { onchainOracle = await this.getOnChainOracleAddress(); } catch {}
+      logger.error('Blockchain closeBetting error', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        contractId,
+        signer: this.wallet?.address,
+        oracle: onchainOracle
+      });
+      throw new Error('Failed to close betting on blockchain');
+    }
   }
 
   async declareWinner(
@@ -89,10 +181,14 @@ export class EthereumService implements IBlockchainService {
       
       return receipt.hash;
     } catch (error) {
+      let onchainOracle: string | undefined;
+      try { onchainOracle = await this.getOnChainOracleAddress(); } catch {}
       logger.error('Blockchain declareWinner error', { 
         error: error instanceof Error ? error.message : 'Unknown error', 
         contractId, 
-        winner 
+        winner,
+        signer: this.wallet?.address,
+        oracle: onchainOracle 
       });
       throw new Error('Failed to declare winner on blockchain');
     }
@@ -107,29 +203,79 @@ export class EthereumService implements IBlockchainService {
       }
       
       const contract = new ethers.Contract(mainContractAddress, this.contractABI, this.provider);
-      // Call getContract with contractId (uint256), not contract address
-      const result = await contract.getContract(contractId);
-      
-      // Parse the returned tuple in the correct order
-      // Returns: (creator, partyA, partyB, bettingEndTime, status, winner, totalPoolA, totalPoolB, partyRewardPercentage)
+
+      // First try the split view functions which are present in the provided Solidity
+      try {
+        const basic: any = await (contract as any)[process.env.GET_CONTRACT_BASIC_METHOD || 'getContractBasic'](contractId);
+        const betting: any = await (contract as any)[process.env.GET_CONTRACT_BETTING_METHOD || 'getContractBetting'](contractId);
+
+        const creator = basic.creator ?? basic[0];
+        // basic[1] is topic, we don't need it for our DTO
+        const partyA = basic.partyA ?? basic[2];
+        const partyB = basic.partyB ?? basic[3];
+        const bettingEndTime = Number(basic.bettingEndTime ?? basic[4]);
+        const status = Number(basic.status ?? basic[5]);
+
+        const winner = Number(betting.winner ?? betting[0]);
+        const totalPoolA = (betting.totalPoolA ?? betting[1])?.toString?.() ?? '0';
+        const totalPoolB = (betting.totalPoolB ?? betting[2])?.toString?.() ?? '0';
+        const partyRewardPercentage = Number(betting.partyRewardPercentage ?? betting[3] ?? 0);
+
+        return {
+          contractId,
+          creator,
+          partyA,
+          partyB,
+          bettingEndTime,
+          status,
+          winner,
+          totalPoolA,
+          totalPoolB,
+          partyRewardPercentage
+        };
+      } catch (splitErr) {
+        logger.debug('Split views not available or failed; falling back to single getContract', {
+          error: splitErr instanceof Error ? splitErr.message : 'Unknown error'
+        });
+      }
+
+      // Fallback to a single getContract result (struct or tuple)
+      const method = process.env.GET_CONTRACT_METHOD || 'getContract';
+      const result: any = await (contract as any)[method](contractId);
+
+      const creator = result.creator ?? result[0];
+      const partyA = result.partyA ?? result[3] ?? result[1]; // struct layout vs older tuple
+      const partyB = result.partyB ?? result[4] ?? result[2];
+      const bettingEndTime = Number(result.bettingEndTime ?? result[5] ?? result[3]);
+      const status = Number(result.status ?? result[6] ?? result[4]);
+      const winner = Number(result.winner ?? result[7] ?? result[5]);
+      const totalPoolA = (result.totalPoolA ?? result[8] ?? result[6])?.toString?.() ?? '0';
+      const totalPoolB = (result.totalPoolB ?? result[9] ?? result[7])?.toString?.() ?? '0';
+      const partyRewardPercentage = Number(result.partyRewardPercentage ?? result[10] ?? result[8] ?? 0);
+
       return {
-        contractId: contractId,
-        creator: result[0],  // address
-        partyA: result[1],   // string
-        partyB: result[2],   // string
-        bettingEndTime: Number(result[3]),  // uint256
-        status: Number(result[4]),  // ContractStatus enum
-        winner: Number(result[5]),  // Choice enum
-        totalPoolA: result[6].toString(),  // uint256 as string
-        totalPoolB: result[7].toString(),  // uint256 as string
-        partyRewardPercentage: Number(result[8])  // uint256
+        contractId,
+        creator,
+        partyA,
+        partyB,
+        bettingEndTime,
+        status,
+        winner,
+        totalPoolA,
+        totalPoolB,
+        partyRewardPercentage
       };
     } catch (error) {
-      logger.error('Failed to get contract data', { 
-        error: error instanceof Error ? error.message : 'Unknown error', 
-        contractId 
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      // Likely ABI mismatch (BAD_DATA). Downgrade to warn with guidance and rethrow.
+      logger.warn('Failed to get contract data (verify ABI/method/address).', { 
+        error: message,
+        contractId,
+        address: process.env.MAIN_CONTRACT_ADDRESS,
+        method: process.env.GET_CONTRACT_METHOD || 'getContract',
+        abiSource: process.env.MAIN_CONTRACT_ABI_PATH ? 'path' : (process.env.MAIN_CONTRACT_ABI_JSON ? 'inline' : 'default')
       });
-      throw new Error('Failed to get contract data from blockchain');
+      throw new Error('Failed to get contract data from blockchain: ' + message);
     }
   }
 

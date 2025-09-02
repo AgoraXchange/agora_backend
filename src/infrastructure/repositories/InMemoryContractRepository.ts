@@ -94,6 +94,20 @@ export class InMemoryContractRepository implements IContractRepository {
     return readyContracts;
   }
 
+  async findContractsToClose(): Promise<Contract[]> {
+    const now = new Date();
+    const toClose: Contract[] = [];
+    for (const contract of this.contracts.values()) {
+      const status = contract.status;
+      if ((status === ContractStatus.CREATED || status === ContractStatus.BETTING_OPEN) &&
+          now >= contract.bettingEndTime &&
+          !contract.winnerId) {
+        toClose.push(contract);
+      }
+    }
+    return toClose;
+  }
+
   async save(contract: Contract): Promise<void> {
     this.contracts.set(contract.id, contract);
   }

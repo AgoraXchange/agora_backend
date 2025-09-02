@@ -1,7 +1,7 @@
 import { DeliberationMessage } from './DeliberationMessage';
 
 export interface ProgressData {
-  currentPhase: 'proposing' | 'judging' | 'consensus' | 'completed';
+  currentPhase: 'proposing' | 'discussion' | 'consensus' | 'completed';
   completedSteps: string[];
   totalSteps: number;
   percentComplete: number;

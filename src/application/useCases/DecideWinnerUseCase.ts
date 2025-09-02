@@ -62,6 +62,16 @@ export class DecideWinnerUseCase {
     return await mutex.runExclusive(async () => {
       logger.info('Starting winner decision process', { contractId: input.contractId });
       try {
+      // Pre-check: ensure signer is authorized oracle to avoid repeated on-chain reverts
+      const authorized = await this.blockchainService.isAuthorizedOracle();
+      if (!authorized) {
+        logger.error('Oracle wallet not authorized to declare winner on-chain');
+        return {
+          success: false,
+          error: 'Oracle wallet not authorized'
+        };
+      }
+
       const contract = await this.contractRepository.findById(input.contractId);
       
       if (!contract) {
@@ -80,9 +90,13 @@ export class DecideWinnerUseCase {
 
       const existingDecision = await this.decisionRepository.findByContractId(input.contractId);
       if (existingDecision) {
-        return { 
-          success: false, 
-          error: 'Winner already decided for this contract' 
+        logger.debug('Existing decision found, returning cached result', { contractId: input.contractId });
+        return {
+          success: true,
+          decisionId: existingDecision.id,
+          winnerId: existingDecision.winnerId,
+          transactionHash: undefined,
+          deliberationMode: (existingDecision.metadata?.dataPoints?.deliberationMode as any) || undefined
         };
       }
 
@@ -118,8 +132,8 @@ export class DecideWinnerUseCase {
   }
 
   async executeAsync(input: DecideWinnerInput): Promise<void> {
-    // Execute deliberation asynchronously without waiting for result
-    this.execute(input).then(result => {
+    // Execute deliberation asynchronously and return a promise that resolves when finished
+    return this.execute(input).then(result => {
       if (result.success) {
         logger.info('Async deliberation completed successfully', {
           contractId: input.contractId,
@@ -236,11 +250,19 @@ export class DecideWinnerUseCase {
         throw new Error('Invalid winner ID: must be either party A or party B');
       }
 
-      // Submit to blockchain using new declareWinner method
-      const txHash = await this.blockchainService.declareWinner(
-        contract.id,
-        winnerChoice
-      );
+      // Submit to blockchain when on-chain status allows (Active or Closed), else skip
+      let txHash: string | undefined;
+      try {
+        const onchain = await this.blockchainService.getContract(contract.id);
+        if (onchain.status === 0 || onchain.status === 1) {
+          txHash = await this.blockchainService.declareWinner(contract.id, winnerChoice);
+        } else {
+          logger.info('Skipping declareWinner: on-chain status not eligible', { contractId: input.contractId, status: onchain.status });
+        }
+      } catch (e) {
+        logger.warn('Could not verify on-chain status before declareWinner, attempting best-effort', { contractId: input.contractId });
+        txHash = await this.blockchainService.declareWinner(contract.id, winnerChoice);
+      }
 
       // Update contract
       contract.setWinner(committeeResult.winnerId);
@@ -330,10 +352,19 @@ export class DecideWinnerUseCase {
       }
 
       // Submit to blockchain using new declareWinner method
-      const txHash = await this.blockchainService.declareWinner(
-        contract.id,
-        winnerChoice
-      );
+      // Submit to blockchain when on-chain status allows (Active or Closed), else skip
+      let txHash: string | undefined;
+      try {
+        const onchain = await this.blockchainService.getContract(contract.id);
+        if (onchain.status === 0 || onchain.status === 1) {
+          txHash = await this.blockchainService.declareWinner(contract.id, winnerChoice);
+        } else {
+          logger.info('Skipping declareWinner: on-chain status not eligible', { contractId: input.contractId, status: onchain.status });
+        }
+      } catch (e) {
+        logger.warn('Could not verify on-chain status before declareWinner, attempting best-effort', { contractId: input.contractId });
+        txHash = await this.blockchainService.declareWinner(contract.id, winnerChoice);
+      }
 
       contract.setWinner(aiResult.winnerId);
       await this.contractRepository.update(contract);

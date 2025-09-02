@@ -1,11 +1,13 @@
 import { injectable, inject } from 'inversify';
 import { IContractRepository } from '../../domain/repositories/IContractRepository';
+import { IOracleDecisionRepository } from '../../domain/repositories/IOracleDecisionRepository';
 import { IBlockchainService } from '../../domain/services/IBlockchainService';
 import { DecideWinnerUseCase } from './DecideWinnerUseCase';
 import { Contract, ContractStatus } from '../../domain/entities/Contract';
 import { Party } from '../../domain/entities/Party';
 import { ContractEventData, BetPlacedEvent } from '../../domain/entities/BettingStats';
 import { logger } from '../../infrastructure/logging/Logger';
+import { DecisionCoordinator } from '../../infrastructure/coordination/DecisionCoordinator';
 
 @injectable()
 export class MonitorContractsUseCase {
@@ -14,7 +16,9 @@ export class MonitorContractsUseCase {
   constructor(
     @inject('IContractRepository') private contractRepository: IContractRepository,
     @inject('IBlockchainService') private blockchainService: IBlockchainService,
-    @inject('DecideWinnerUseCase') private decideWinnerUseCase: DecideWinnerUseCase
+    @inject('DecideWinnerUseCase') private decideWinnerUseCase: DecideWinnerUseCase,
+    @inject('IOracleDecisionRepository') private decisionRepository: IOracleDecisionRepository,
+    @inject('DecisionCoordinator') private coordinator: DecisionCoordinator
   ) {}
 
   async execute(): Promise<void> {
@@ -24,16 +28,70 @@ export class MonitorContractsUseCase {
       this.isEventListenerInitialized = true;
     }
 
-    // Monitor existing contracts ready for decision
-    const contractsReadyForDecision = await this.contractRepository.findContractsReadyForDecision();
-    
-    for (const contract of contractsReadyForDecision) {
-      logger.info(`Processing contract ${contract.id} for winner decision`);
-      
-      const result = await this.decideWinnerUseCase.execute({
-        contractId: contract.id
+    // Step 1: Close betting on contracts whose deadline has passed (status 0 -> 1 on-chain)
+    try {
+      const contractsToClose = await this.contractRepository.findContractsToClose();
+      for (const contract of contractsToClose) {
+        let onchainStatus: number | null = null;
+        try {
+          // Try to read on-chain status (best effort)
+          const onchain = await this.blockchainService.getContract(contract.id);
+          onchainStatus = onchain.status;
+        } catch (readError) {
+          logger.warn('Could not read on-chain contract for close check, proceeding to close (best effort)', {
+            contractId: contract.id,
+            error: readError instanceof Error ? readError.message : 'Unknown error'
+          });
+        }
+
+        try {
+          if (onchainStatus === null || onchainStatus === 0) {
+            logger.info('Closing betting for contract (deadline passed)', { contractId: contract.id });
+            await this.blockchainService.closeBetting(contract.id);
+          } else {
+            logger.info('On-chain already closed, syncing local status', { contractId: contract.id, onchainStatus });
+          }
+        } catch (closeError) {
+          logger.error('Failed to submit closeBetting on-chain', {
+            contractId: contract.id,
+            error: closeError instanceof Error ? closeError.message : 'Unknown error'
+          });
+        }
+
+        // Update local status so server-side logic advances; FE still relies on chain state
+        try {
+          contract.status = ContractStatus.BETTING_CLOSED;
+          await this.contractRepository.update(contract);
+        } catch (updateError) {
+          logger.error('Failed to update local status to BETTING_CLOSED', {
+            contractId: contract.id,
+            error: updateError instanceof Error ? updateError.message : 'Unknown error'
+          });
+        }
+      }
+    } catch (error) {
+      logger.error('Error while scanning contracts to close betting', {
+        error: error instanceof Error ? error.message : 'Unknown error'
       });
-      
+    }
+
+    // Step 2: Monitor existing contracts ready for decision
+    const contractsReadyForDecision = await this.contractRepository.findContractsReadyForDecision();
+    for (const contract of contractsReadyForDecision) {
+      // Skip if a decision already exists (avoids noisy repeated attempts)
+      const existingDecision = await this.decisionRepository.findByContractId(contract.id);
+      if (existingDecision) {
+        logger.debug('Skipping contract already decided', { contractId: contract.id });
+        continue;
+      }
+
+      // Prevent duplicate work if an event/endpoint already started processing
+      if (!this.coordinator.tryStart(contract.id)) {
+        continue;
+      }
+
+      logger.info(`Processing contract ${contract.id} for winner decision`);
+      const result = await this.decideWinnerUseCase.execute({ contractId: contract.id });
       if (result.success) {
         logger.info(`Winner decided for contract ${contract.id}: ${result.winnerId}`, {
           contractId: contract.id,
@@ -41,11 +99,17 @@ export class MonitorContractsUseCase {
           transactionHash: result.transactionHash
         });
       } else {
-        logger.error(`Failed to decide winner for contract ${contract.id}: ${result.error}`, {
+        // Downgrade to debug for already-decided noise
+        const isAlreadyDecided = result.error === 'Winner already decided for this contract';
+        const logFn = isAlreadyDecided ? logger.debug.bind(logger) : logger.error.bind(logger);
+        logFn(`Failed to decide winner for contract ${contract.id}: ${result.error}`, {
           contractId: contract.id,
           error: result.error
         });
       }
+
+      // Always finish with cooldown to absorb flapping
+      this.coordinator.finish(contract.id);
     }
   }
 

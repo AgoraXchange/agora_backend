@@ -77,6 +77,16 @@ export class MongoContractRepository implements IContractRepository {
     return docs.map(doc => this.documentToEntity(doc));
   }
 
+  async findContractsToClose(): Promise<Contract[]> {
+    const now = new Date();
+    const docs = await this.collection.find({
+      status: { $in: [ContractStatus.CREATED, ContractStatus.BETTING_OPEN] },
+      bettingEndTime: { $lte: now },
+      winnerId: { $exists: false }
+    }).toArray();
+    return docs.map(doc => this.documentToEntity(doc));
+  }
+
   async save(contract: Contract): Promise<void> {
     const doc = this.entityToDocument(contract);
     await this.collection.insertOne(doc);

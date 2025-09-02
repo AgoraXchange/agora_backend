@@ -97,24 +97,18 @@ export class ConsensusSynthesizer implements ISynthesizerService {
     evaluations: JudgeEvaluation[]
   ): { winner: string; confidence: number } {
     const evaluationMap = new Map(evaluations.map(e => [e.proposalId, e]));
-    
-    switch (this.config.consensusMethod) {
-      case 'majority':
-        return this.majorityVoting(proposals);
-      
-      case 'borda':
-        return this.bordaCount(proposals, evaluations);
-      
-      case 'weighted_voting':
-        return this.weightedVoting(proposals, evaluationMap);
-      
-      case 'approval':
-        return this.approvalVoting(proposals, evaluationMap);
-      
-      default:
-        logger.warn(`Unknown consensus method ${this.config.consensusMethod}, falling back to majority`);
-        return this.majorityVoting(proposals);
+
+    // Unanimity-first: if all proposals point to the same winnerId, choose it with high confidence
+    const uniqueWinners = Array.from(new Set(proposals.map(p => p.winnerId)));
+    if (uniqueWinners.length === 1) {
+      const unanimousWinner = uniqueWinners[0];
+      const confidence = 0.95; // strong consensus by unanimity
+      logger.debug('Unanimity achieved; selecting unanimous winner', { winner: unanimousWinner, confidence });
+      return { winner: unanimousWinner, confidence };
     }
+
+    // Fallback: simple majority across proposals
+    return this.majorityVoting(proposals);
   }
 
   private majorityVoting(proposals: AgentProposal[]): { winner: string; confidence: number } {
