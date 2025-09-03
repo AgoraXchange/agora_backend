@@ -8,14 +8,15 @@ export class CryptoService {
 
   constructor() {
     this.encryptionKey = process.env.ENCRYPTION_KEY || '';
-    
+    // Do not throw during construction to allow apps that don't need crypto to boot
     if (!this.encryptionKey || this.encryptionKey.length < 32) {
-      throw new Error('Encryption key must be at least 32 characters long');
+      logger.warn('ENCRYPTION_KEY is not set or too short; cryptographic operations will be disabled until properly configured');
     }
   }
 
   encrypt(text: string): string {
     try {
+      this.assertKey();
       const encrypted = CryptoJS.AES.encrypt(text, this.encryptionKey).toString();
       return encrypted;
     } catch (error) {
@@ -26,6 +27,7 @@ export class CryptoService {
 
   decrypt(encryptedText: string): string {
     try {
+      this.assertKey();
       const decrypted = CryptoJS.AES.decrypt(encryptedText, this.encryptionKey);
       return decrypted.toString(CryptoJS.enc.Utf8);
     } catch (error) {
@@ -39,7 +41,13 @@ export class CryptoService {
     if (!encryptedKey) {
       throw new Error('Encrypted private key not configured');
     }
-    
+    this.assertKey();
     return this.decrypt(encryptedKey);
+  }
+
+  private assertKey(): void {
+    if (!this.encryptionKey || this.encryptionKey.length < 32) {
+      throw new Error('ENCRYPTION_KEY missing or too short (>= 32 chars required)');
+    }
   }
 }

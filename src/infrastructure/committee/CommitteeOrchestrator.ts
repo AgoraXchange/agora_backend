@@ -18,7 +18,7 @@ import { ConsensusResult as ConsensusResultEntity, EvidenceSource } from '../../
 @injectable()
 export class CommitteeOrchestrator implements ICommitteeService {
   private agentWeights: Record<string, number> = {};
-  private config: CommitteeConfiguration;
+  private config!: CommitteeConfiguration;
   private currentDeliberationId?: string;
   private lastAgentWinners: Map<string, string> = new Map();
   private lastUpdatedProposals: AgentProposal[] = [];

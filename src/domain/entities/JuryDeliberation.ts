@@ -20,11 +20,11 @@ export class JuryDeliberation {
     public readonly investigationReportId: string,
     public readonly initialJurors: JurorOpinion[],      // 초기 배심원 의견
     public readonly deliberationRounds: DeliberationRound[],
-    public finalVerdict?: Choice,
     public readonly unanimousDecision: boolean,
-    public readonly finalJurors?: JurorOpinion[],       // 최종 배심원 의견
     public readonly deliberationTimeMs: number = 0,
-    public readonly createdAt: Date = new Date()
+    public readonly createdAt: Date = new Date(),
+    public finalVerdict?: Choice,
+    public readonly finalJurors?: JurorOpinion[]       // 최종 배심원 의견
   ) {
     this.validateDeliberation();
   }

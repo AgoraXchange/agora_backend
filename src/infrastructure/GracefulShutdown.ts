@@ -12,8 +12,10 @@ export class GracefulShutdown {
   private setupSignalHandlers(): void {
     process.on('SIGTERM', () => this.shutdown('SIGTERM'));
     process.on('SIGINT', () => this.shutdown('SIGINT'));
-    process.on('uncaughtException', (error) => {
-      logger.error('Uncaught Exception', { error: error.message, stack: error.stack });
+    process.on('uncaughtException', (error: any) => {
+      const msg = error && error.message ? error.message : String(error);
+      const stack = error && error.stack ? error.stack : undefined;
+      logger.error('Uncaught Exception', { error: msg, stack });
       this.shutdown('uncaughtException');
     });
     process.on('unhandledRejection', (reason, promise) => {
@@ -67,7 +69,7 @@ export class GracefulShutdown {
       logger.info('Graceful shutdown completed');
       process.exit(0);
     } catch (error) {
-      logger.error('Error during shutdown', { error: error.message });
+      logger.error('Error during shutdown', { error: error instanceof Error ? error.message : 'Unknown error' });
       clearTimeout(shutdownTimeout);
       process.exit(1);
     }

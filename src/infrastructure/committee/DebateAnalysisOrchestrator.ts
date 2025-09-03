@@ -335,10 +335,11 @@ export class DebateAnalysisOrchestrator {
       report.id,
       [], // 배심원 없음
       [], // 토론 없음
-      verdict,
       true, // 즉시 결정이므로 만장일치로 간주
-      [],
-      0
+      0,
+      undefined,
+      verdict,
+      []
     );
   }
   
@@ -353,10 +354,11 @@ export class DebateAnalysisOrchestrator {
       'failed_report',
       [],
       [],
-      Choice.UNDECIDED,
       false,
-      [],
-      0
+      0,
+      undefined,
+      Choice.UNDECIDED,
+      []
     );
   }
   

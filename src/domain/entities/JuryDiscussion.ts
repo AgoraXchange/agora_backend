@@ -8,12 +8,12 @@ export class JuryDiscussion {
     public readonly speakerId: JurorId,
     public readonly speakerName: string,
     public readonly statement: string,              // 발언 내용
-    public readonly addressingJuror?: JurorId,      // 특정 배심원에게 하는 말
     public readonly argumentType: ArgumentType,
-    public readonly referencePoint?: string,        // 참조하는 논점
     public readonly emotionalTone: 'neutral' | 'assertive' | 'questioning' | 'conciliatory',
     public readonly persuasionIntent: number,       // 설득 의도 강도 (0-1)
-    public readonly timestamp: Date = new Date()
+    public readonly timestamp: Date = new Date(),
+    public readonly addressingJuror?: JurorId,      // 특정 배심원에게 하는 말
+    public readonly referencePoint?: string        // 참조하는 논점
   ) {
     this.validateDiscussion();
   }
