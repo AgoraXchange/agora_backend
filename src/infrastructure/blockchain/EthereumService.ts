@@ -14,6 +14,8 @@ export class EthereumService implements IBlockchainService {
   private wsUrl?: string;
   private wsReconnectAttempt: number = 0;
   private wsReconnectTimer?: NodeJS.Timeout;
+  private wsHealthTimer?: NodeJS.Timeout;
+  private wsHealthFailures: number = 0;
   private wallet: ethers.Wallet | null = null;
   private contractABI: any[];
   private eventListeners: Map<string, ethers.Contract> = new Map();
@@ -41,6 +43,7 @@ export class EthereumService implements IBlockchainService {
         this.wsProvider = new ethers.WebSocketProvider(wsUrl);
         logger.info('WebSocket provider initialized for event subscriptions');
         this.attachWsReconnectHandlers();
+        this.startWsHealthMonitor();
       } catch (err) {
         logger.warn('Failed to initialize WebSocket provider; falling back to HTTP polling', {
           error: err instanceof Error ? err.message : 'Unknown error'
@@ -522,15 +525,13 @@ export class EthereumService implements IBlockchainService {
 
     const providerAny: any = this.wsProvider as any;
 
-    // Provider-level events if available
-    try { providerAny.on?.('error', (err: any) => this.handleWsError(err)); } catch {}
-    try { providerAny.on?.('close', (code: any) => this.handleWsClose(code)); } catch {}
-
-    // Low-level websocket (best-effort, depends on ethers internals)
+    // Only use low-level websocket events; ethers v6 ProviderEvent does not include 'close'/'error'
     const ws: any = providerAny._websocket ?? providerAny._ws ?? providerAny._socket;
     if (ws && typeof ws.on === 'function') {
       try { ws.on('error', (err: any) => this.handleWsError(err)); } catch {}
       try { ws.on('close', (code: any) => this.handleWsClose(code)); } catch {}
+    } else {
+      logger.info('WebSocket underlying socket not accessible; relying on health monitor for reconnects');
     }
   }
 
@@ -542,6 +543,76 @@ export class EthereumService implements IBlockchainService {
   private handleWsError(error: any): void {
     logger.warn('WebSocket provider error; scheduling reconnect', { error: error?.message || String(error) });
     this.scheduleWsReconnect();
+  }
+
+  // Health monitoring for WS provider when underlying socket is not accessible
+  private async pingWsProvider(timeoutMs: number = 5000): Promise<boolean> {
+    if (!this.wsProvider) return false;
+    const prov = this.wsProvider;
+    return await new Promise<boolean>((resolve) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          resolve(false);
+        }
+      }, timeoutMs);
+
+      prov.getBlockNumber().then(() => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          resolve(true);
+        }
+      }).catch(() => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          resolve(false);
+        }
+      });
+    });
+  }
+
+  private startWsHealthMonitor(): void {
+    // Clear existing
+    if (this.wsHealthTimer) {
+      clearInterval(this.wsHealthTimer);
+      this.wsHealthTimer = undefined;
+    }
+    this.wsHealthFailures = 0;
+    if (!this.wsProvider) return;
+
+    // Check every 15s with 5s timeout
+    this.wsHealthTimer = setInterval(async () => {
+      try {
+        if (!this.wsProvider) return;
+        const ok = await this.pingWsProvider(5000);
+        if (!ok) {
+          this.wsHealthFailures++;
+          logger.warn('WebSocket health check failed', { failures: this.wsHealthFailures });
+          if (this.wsHealthFailures >= 3) {
+            logger.warn('WebSocket unhealthy; forcing reconnect');
+            try { (this.wsProvider as any).destroy?.(); } catch {}
+            this.scheduleWsReconnect();
+            this.wsHealthFailures = 0;
+          }
+        } else if (this.wsHealthFailures > 0) {
+          logger.info('WebSocket health check recovered');
+          this.wsHealthFailures = 0;
+        }
+      } catch (err) {
+        logger.warn('WebSocket health monitor error', { error: err instanceof Error ? err.message : String(err) });
+      }
+    }, 15000);
+  }
+
+  private stopWsHealthMonitor(): void {
+    if (this.wsHealthTimer) {
+      clearInterval(this.wsHealthTimer);
+      this.wsHealthTimer = undefined;
+    }
+    this.wsHealthFailures = 0;
   }
 
   private scheduleWsReconnect(): void {
@@ -577,6 +648,7 @@ export class EthereumService implements IBlockchainService {
 
       // Attach handlers again
       this.attachWsReconnectHandlers();
+      this.startWsHealthMonitor();
 
       // Re-subscribe all event listeners on the new provider
       this.resubscribeAllListeners();
@@ -636,5 +708,19 @@ export class EthereumService implements IBlockchainService {
 
     // Clear all callbacks
     this.eventCallbacks.clear();
+
+    // Stop WS health monitor and reconnect attempts
+    this.stopWsHealthMonitor();
+    if (this.wsReconnectTimer) {
+      clearTimeout(this.wsReconnectTimer);
+      this.wsReconnectTimer = undefined;
+    }
+    // Try to close/destroy ws provider
+    if (this.wsProvider) {
+      try { (this.wsProvider as any).removeAllListeners?.(); } catch {}
+      try { (this.wsProvider as any)._websocket?.terminate?.(); } catch {}
+      try { (this.wsProvider as any)._websocket?.close?.(); } catch {}
+      this.wsProvider = undefined;
+    }
   }
 }
