@@ -132,10 +132,11 @@ export class JuryOrchestrator implements IJuryService {
         report.id,
         initialOpinions,
         deliberationRounds,
-        finalVerdict,
         unanimous,
-        currentOpinions,
-        deliberationTime
+        deliberationTime,
+        undefined,
+        finalVerdict,
+        currentOpinions
       );
 
       logger.info('Deliberation completed', {

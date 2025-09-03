@@ -121,6 +121,20 @@ export class MonitorContractsUseCase {
       this.handleContractCreated(event);
     });
 
+    // Listen once for BetPlaced events on the main contract
+    const mainContractAddress = process.env.MAIN_CONTRACT_ADDRESS;
+    if (!mainContractAddress) {
+      logger.error('Main contract address not configured for BetPlaced listener');
+    } else {
+      this.blockchainService.listenToBetPlaced(
+        mainContractAddress,
+        (betEvent: BetPlacedEvent) => {
+          this.handleBetPlaced(betEvent);
+        }
+      );
+      logger.info('BetPlaced listener initialized at startup', { contractAddress: mainContractAddress });
+    }
+
     logger.info('Blockchain event listeners initialized');
   }
 
@@ -175,14 +189,6 @@ export class MonitorContractsUseCase {
         partyA: event.partyA,
         partyB: event.partyB
       });
-
-      // Start listening for bet placed events for this contract
-      this.blockchainService.listenToBetPlaced(
-        event.transactionHash, // Using transaction hash as contract address
-        (betEvent: BetPlacedEvent) => {
-          this.handleBetPlaced(betEvent);
-        }
-      );
 
     } catch (error) {
       logger.error('Error processing ContractCreated event', {

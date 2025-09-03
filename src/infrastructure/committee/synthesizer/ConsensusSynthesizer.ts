@@ -1,10 +1,11 @@
 import { injectable } from 'inversify';
-import { ISynthesizerService, ConsensusResult } from '../../../domain/services/IAgentService';
+import { ISynthesizerService } from '../../../domain/services/IAgentService';
 import { AgentProposal } from '../../../domain/entities/AgentProposal';
 import { JudgeEvaluation } from '../../../domain/entities/JudgeEvaluation';
 import { ConsensusResult as ConsensusResultEntity } from '../../../domain/valueObjects/ConsensusResult';
 import { EvidenceSource, ConsensusMetrics } from '../../../domain/valueObjects/ConsensusResult';
 import { OpenAIService } from '../../ai/OpenAIService';
+import { Party } from '../../../domain/entities/Party';
 import { logger } from '../../logging/Logger';
 
 export type ConsensusMethod = 'majority' | 'borda' | 'weighted_voting' | 'approval';
@@ -31,7 +32,7 @@ export class ConsensusSynthesizer implements ISynthesizerService {
   async synthesizeConsensus(
     rankedProposals: AgentProposal[],
     evaluations: JudgeEvaluation[]
-  ): Promise<ConsensusResult> {
+  ): Promise<ConsensusResultEntity> {
     logger.info('Starting consensus synthesis', {
       proposalCount: rankedProposals.length,
       evaluationCount: evaluations.length,
@@ -368,10 +369,10 @@ export class ConsensusSynthesizer implements ISynthesizerService {
       const prompt = this.createSynthesisPrompt(proposals, evaluations, winner, evidence);
       
       const aiResponse = await this.aiService.analyzeAndDecideWinner({
-        partyA: { id: 'synthesis', address: 'ai_synthesis', name: 'Synthesis A', description: 'Synthesis task' },
-        partyB: { id: 'synthesis', address: 'ai_synthesis', name: 'Synthesis B', description: 'Synthesis task' },
+        partyA: new Party('synthesis', 'ai_synthesis', 'Synthesis A', 'Synthesis task'),
+        partyB: new Party('synthesis', 'ai_synthesis', 'Synthesis B', 'Synthesis task'),
         contractId: 'consensus_synthesis',
-        context: { synthesisPrompt: prompt }
+        additionalContext: { prompt }
       });
 
       return aiResponse.metadata.reasoning || this.createBasicSynthesis(proposals, winner, evidence);

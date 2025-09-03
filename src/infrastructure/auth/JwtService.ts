@@ -50,11 +50,11 @@ export class JwtService {
       role: user.role
     };
 
-    const accessToken = jwt.sign(payload, this.accessTokenSecret, {
+    const accessToken = (jwt as any).sign(payload, this.accessTokenSecret, {
       expiresIn: this.accessTokenExpiry
     });
 
-    const refreshToken = jwt.sign(payload, this.refreshTokenSecret, {
+    const refreshToken = (jwt as any).sign(payload, this.refreshTokenSecret, {
       expiresIn: this.refreshTokenExpiry
     });
 

@@ -1,5 +1,7 @@
 import { Party } from '../entities/Party';
 import { AgentProposal } from '../entities/AgentProposal';
+import { JudgeEvaluation } from '../entities/JudgeEvaluation';
+import { ConsensusResult as ConsensusResultEntity } from '../valueObjects/ConsensusResult';
 
 export interface AgentAnalysisInput {
   contractId: string;
@@ -70,7 +72,7 @@ export interface ISynthesizerService {
   synthesizeConsensus(
     rankedProposals: AgentProposal[],
     evaluations: JudgeEvaluation[]
-  ): Promise<ConsensusResult>;
+  ): Promise<ConsensusResultEntity>;
 }
 
 export interface RuleBasedEvaluation {
@@ -89,25 +91,8 @@ export interface PairwiseComparison {
   confidence: number;
 }
 
-export interface JudgeEvaluation {
-  proposalId: string;
-  ruleBasedScore: number;
-  pairwiseWins: number;
-  pairwiseLosses: number;
-  averageScore: number;
-  reasoning: string[];
-}
-
 export interface ProposalRanking {
   rankedProposals: string[]; // proposalIds in order
   scores: Record<string, number>;
   confidenceLevel: number;
-}
-
-export interface ConsensusResult {
-  finalWinner: string;
-  mergedEvidence: string[];
-  confidenceLevel: number;
-  residualUncertainty: number;
-  methodology: string;
 }

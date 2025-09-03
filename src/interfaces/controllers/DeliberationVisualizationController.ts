@@ -34,12 +34,12 @@ export class DeliberationVisualizationController {
       }
       const mode = (decision.metadata as any)?.deliberationMode ?? (decision.metadata as any)?.dataPoints?.deliberationMode;
       if (mode !== 'committee') {
-        throw AppError.badRequest('This decision was not made by committee deliberation');
+        throw AppError.validationError('This decision was not made by committee deliberation');
       }
 
       const messages = this.eventEmitter.getMessageHistory(decision.contractId);
       if (messages.length === 0) {
-        throw AppError.badRequest('No deliberation messages available in memory for this decision');
+        throw AppError.validationError('No deliberation messages available in memory for this decision');
       }
 
       const { ClaudeJurySynthesisService } = await import('../../infrastructure/ai/ClaudeJurySynthesisService');
@@ -92,13 +92,13 @@ export class DeliberationVisualizationController {
       // Check if this was a committee decision (fallback to metadata.dataPoints.deliberationMode)
       const mode = (decision.metadata as any)?.deliberationMode ?? (decision.metadata as any)?.dataPoints?.deliberationMode;
       if (mode !== 'committee') {
-        throw AppError.badRequest('This decision was not made by committee deliberation');
+        throw AppError.validationError('This decision was not made by committee deliberation');
       }
 
       // Fallback for committeeDecisionId from metadata.dataPoints
       const committeeDecisionId = (decision.metadata as any)?.committeeDecisionId ?? (decision.metadata as any)?.dataPoints?.committeeDecisionId;
       if (!committeeDecisionId) {
-        throw AppError.badRequest('Committee decision ID not found in metadata');
+        throw AppError.validationError('Committee decision ID not found in metadata');
       }
 
       // Get stored messages from event emitter
@@ -378,11 +378,11 @@ export class DeliberationVisualizationController {
           exportedAt: new Date().toISOString(),
           format
         },
-        summary: visualization?.toSummary(),
-        performanceMetrics: visualization?.getPerformanceMetrics(),
-        timeline: visualization?.getKeyTimeline(),
-        votingResults: visualization?.getVotingChartData(),
-        evaluationScores: visualization?.getRadarChartData(),
+        summary: visualization?.toSummary?.(),
+        performanceMetrics: visualization?.getPerformanceMetrics?.(),
+        timeline: visualization?.getKeyTimeline?.(),
+        votingResults: visualization?.getVotingChartData?.(),
+        evaluationScores: visualization?.getRadarChartData?.(),
         fullMessages: messages.map(m => ({
           timestamp: m.metadata.timestamp,
           phase: m.phase,

@@ -76,7 +76,7 @@ Determine winner. Return JSON.`
         maxTokens: this.config.maxTokens 
       });
 
-      const completion = await this.openai.chat.completions.create({
+      const completion = await (this.openai.chat.completions.create as any)({
         model: this.getModelName(),
         messages: [
           {
@@ -84,11 +84,11 @@ Determine winner. Return JSON.`
             content: prompt
           }
         ],
-        temperature: 1, // GPT-5 only supports temperature 1
+        // Casting to any to allow newer params on older SDK typings
+        temperature: 1,
         max_completion_tokens: this.config.maxTokens,
-        // GPT-5 doesn't support top_p, frequency_penalty, presence_penalty
-        response_format: { type: 'json_object' } // Force JSON response
-      });
+        response_format: { type: 'json_object' }
+      } as any);
 
       const usage = completion.usage;
       const content = completion.choices[0]?.message?.content;

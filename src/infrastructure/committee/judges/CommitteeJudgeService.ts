@@ -3,9 +3,9 @@ import {
   IJudgeService, 
   RuleBasedEvaluation, 
   PairwiseComparison, 
-  JudgeEvaluation, 
   ProposalRanking 
 } from '../../../domain/services/IAgentService';
+import { JudgeEvaluation } from '../../../domain/entities/JudgeEvaluation';
 import { AgentProposal } from '../../../domain/entities/AgentProposal';
 import { RuleBasedJudge } from './RuleBasedJudge';
 import { LLMJudge } from './LLMJudge';
@@ -207,7 +207,7 @@ export class CommitteeJudgeService implements IJudgeService {
       'Committee Comprehensive Judge',
       ruleBasedScore,
       criteria,
-      pairwiseResults,
+      proposalPairwiseResults,
       overallScore,
       reasoning,
       confidence,

@@ -10,6 +10,10 @@ import { logger } from '../logging/Logger';
 @injectable()
 export class EthereumService implements IBlockchainService {
   private provider: ethers.JsonRpcProvider;
+  private wsProvider?: ethers.WebSocketProvider;
+  private wsUrl?: string;
+  private wsReconnectAttempt: number = 0;
+  private wsReconnectTimer?: NodeJS.Timeout;
   private wallet: ethers.Wallet | null = null;
   private contractABI: any[];
   private eventListeners: Map<string, ethers.Contract> = new Map();
@@ -22,11 +26,28 @@ export class EthereumService implements IBlockchainService {
     @inject('CryptoService') private cryptoService: CryptoService
   ) {
     const rpcUrl = process.env.ETHEREUM_RPC_URL || 'http://localhost:8545';
-    this.mockMode = process.env.BLOCKCHAIN_MOCK_MODE === 'true' || process.env.NODE_ENV === 'development';
+    const useReal = process.env.USE_REAL_BLOCKCHAIN === 'true';
+    this.mockMode = process.env.BLOCKCHAIN_MOCK_MODE === 'true' || !useReal || process.env.NODE_ENV === 'development';
     
     this.provider = new ethers.JsonRpcProvider(rpcUrl);
     // Enable polling to avoid WebSocket filter errors
     this.provider.pollingInterval = 4000; // 4 seconds
+    
+    // Initialize WebSocket provider for event subscriptions when available
+    const wsUrl = process.env.ETHEREUM_WS_URL;
+    this.wsUrl = wsUrl;
+    if (wsUrl && wsUrl.trim().length > 0) {
+      try {
+        this.wsProvider = new ethers.WebSocketProvider(wsUrl);
+        logger.info('WebSocket provider initialized for event subscriptions');
+        this.attachWsReconnectHandlers();
+      } catch (err) {
+        logger.warn('Failed to initialize WebSocket provider; falling back to HTTP polling', {
+          error: err instanceof Error ? err.message : 'Unknown error'
+        });
+      }
+    }
+    
     
     if (this.mockMode) {
       // Use a test wallet for development/testing
@@ -317,8 +338,9 @@ export class EthereumService implements IBlockchainService {
       this.eventListeners.get(key)?.removeAllListeners('ContractCreated');
     }
 
-    // Use the main provider which is already configured for polling
-    const pollingContract = new ethers.Contract(contractAddress, this.contractABI, this.provider);
+    // Use WebSocket provider for events when available; otherwise fall back to polling HTTP provider
+    const eventProvider = this.wsProvider ?? this.provider;
+    const pollingContract = new ethers.Contract(contractAddress, this.contractABI, eventProvider);
     
     const wrappedCallback = (contractId: any, creator: any, topic: any, description: any, partyA: any, partyB: any, bettingEndTime: any, event: any) => {
       try {
@@ -384,8 +406,9 @@ export class EthereumService implements IBlockchainService {
       this.eventListeners.get(key)?.removeAllListeners('BetPlaced');
     }
 
-    // Use the main provider which is already configured for polling
-    const pollingContract = new ethers.Contract(contractAddress, this.contractABI, this.provider);
+    // Use WebSocket provider for events when available; otherwise fall back to polling HTTP provider
+    const eventProvider = this.wsProvider ?? this.provider;
+    const pollingContract = new ethers.Contract(contractAddress, this.contractABI, eventProvider);
     
     const wrappedCallback = (contractId: any, bettor: any, choice: any, amount: any, event: any) => {
       try {
@@ -437,7 +460,8 @@ export class EthereumService implements IBlockchainService {
       return;
     }
 
-    const contract = new ethers.Contract(contractAddress, this.contractABI, this.provider);
+    const eventProvider = this.wsProvider ?? this.provider;
+    const contract = new ethers.Contract(contractAddress, this.contractABI, eventProvider);
     const key = `${contractAddress}-${eventName}`;
     
     if (this.eventListeners.has(key)) {
@@ -445,6 +469,9 @@ export class EthereumService implements IBlockchainService {
       this.removeEventListener(contractAddress, eventName);
     }
     
+    // Store callback so we can re-subscribe on WS reconnect
+    this.eventCallbacks.set(key, callback);
+
     contract.on(eventName, (...args) => {
       const event = args[args.length - 1];
       callback(event);
@@ -487,6 +514,109 @@ export class EthereumService implements IBlockchainService {
 
     // Clear callback
     this.eventCallbacks.delete(key);
+  }
+  
+  // Attach WS reconnect handlers for robustness in ephemeral environments
+  private attachWsReconnectHandlers(): void {
+    if (!this.wsProvider) return;
+
+    const providerAny: any = this.wsProvider as any;
+
+    // Provider-level events if available
+    try { providerAny.on?.('error', (err: any) => this.handleWsError(err)); } catch {}
+    try { providerAny.on?.('close', (code: any) => this.handleWsClose(code)); } catch {}
+
+    // Low-level websocket (best-effort, depends on ethers internals)
+    const ws: any = providerAny._websocket ?? providerAny._ws ?? providerAny._socket;
+    if (ws && typeof ws.on === 'function') {
+      try { ws.on('error', (err: any) => this.handleWsError(err)); } catch {}
+      try { ws.on('close', (code: any) => this.handleWsClose(code)); } catch {}
+    }
+  }
+
+  private handleWsClose(code: any): void {
+    logger.warn('WebSocket provider closed; scheduling reconnect', { code });
+    this.scheduleWsReconnect();
+  }
+
+  private handleWsError(error: any): void {
+    logger.warn('WebSocket provider error; scheduling reconnect', { error: error?.message || String(error) });
+    this.scheduleWsReconnect();
+  }
+
+  private scheduleWsReconnect(): void {
+    if (this.wsReconnectTimer) return; // already scheduled
+
+    const attempt = this.wsReconnectAttempt++;
+    const delay = Math.min(30000, 1000 * Math.pow(2, attempt)); // capped exponential backoff
+    logger.info('Scheduling WebSocket reconnect', { attempt, delay });
+
+    this.wsReconnectTimer = setTimeout(() => {
+      this.wsReconnectTimer = undefined;
+      this.reconnectWsProvider().catch((err) => {
+        logger.error('WebSocket reconnect failed', { error: err?.message || String(err) });
+        // Schedule next attempt
+        this.scheduleWsReconnect();
+      });
+    }, delay);
+  }
+
+  private async reconnectWsProvider(): Promise<void> {
+    if (!this.wsUrl) return; // WS not configured
+
+    try {
+      // Dispose old provider listeners
+      if (this.wsProvider) {
+        try { (this.wsProvider as any).removeAllListeners?.(); } catch {}
+      }
+
+      // Create new provider
+      this.wsProvider = new ethers.WebSocketProvider(this.wsUrl);
+      this.wsReconnectAttempt = 0; // reset backoff on success
+      logger.info('WebSocket provider reconnected');
+
+      // Attach handlers again
+      this.attachWsReconnectHandlers();
+
+      // Re-subscribe all event listeners on the new provider
+      this.resubscribeAllListeners();
+    } catch (err) {
+      logger.error('Failed to reconnect WebSocket provider', { error: err instanceof Error ? err.message : 'Unknown error' });
+      throw err;
+    }
+  }
+
+  private resubscribeAllListeners(): void {
+    // For each registered callback key, rebuild the listener using the new provider
+    for (const [key, cb] of this.eventCallbacks.entries()) {
+      const lastDash = key.lastIndexOf('-');
+      if (lastDash <= 0) continue;
+      const contractAddress = key.substring(0, lastDash);
+      const eventName = key.substring(lastDash + 1);
+
+      try {
+        if (eventName === 'ContractCreated') {
+          this.setupContractCreatedListener(contractAddress, key, cb as (ev: ContractEventData) => void);
+        } else if (eventName === 'BetPlaced') {
+          this.setupBetPlacedListener(contractAddress, key, cb as (ev: BetPlacedEvent) => void);
+        } else {
+          // Generic rebind
+          const eventProvider = this.wsProvider ?? this.provider;
+          const contract = new ethers.Contract(contractAddress, this.contractABI, eventProvider);
+          contract.on(eventName, (...args: any[]) => {
+            const event = args[args.length - 1];
+            (cb as (ev: any) => void)(event);
+          });
+          this.eventListeners.set(key, contract);
+        }
+        logger.info('Re-subscribed event listener after WS reconnect', { contractAddress, eventName });
+      } catch (err) {
+        logger.error('Failed to re-subscribe listener after WS reconnect', {
+          key,
+          error: err instanceof Error ? err.message : 'Unknown error'
+        });
+      }
+    }
   }
 
   cleanup(): void {

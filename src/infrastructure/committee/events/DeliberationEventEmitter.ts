@@ -20,7 +20,7 @@ import { logger } from '../../logging/Logger';
 
 @injectable()
 export class DeliberationEventEmitter extends EventEmitter {
-  private listeners: Map<string, IDeliberationEventListener[]> = new Map();
+  private listenersMap: Map<string, IDeliberationEventListener[]> = new Map();
   private messageHistory: Map<string, DeliberationMessage[]> = new Map();
 
   constructor() {
@@ -32,10 +32,10 @@ export class DeliberationEventEmitter extends EventEmitter {
    * Registers a listener for a specific contract's deliberation
    */
   registerListener(contractId: string, listener: IDeliberationEventListener): void {
-    if (!this.listeners.has(contractId)) {
-      this.listeners.set(contractId, []);
+    if (!this.listenersMap.has(contractId)) {
+      this.listenersMap.set(contractId, []);
     }
-    this.listeners.get(contractId)!.push(listener);
+    this.listenersMap.get(contractId)!.push(listener);
     
     logger.debug('Deliberation listener registered', { contractId });
   }
@@ -44,7 +44,7 @@ export class DeliberationEventEmitter extends EventEmitter {
    * Unregisters a listener
    */
   unregisterListener(contractId: string, listener: IDeliberationEventListener): void {
-    const contractListeners = this.listeners.get(contractId);
+    const contractListeners = this.listenersMap.get(contractId);
     if (contractListeners) {
       const index = contractListeners.indexOf(listener);
       if (index > -1) {
@@ -52,7 +52,7 @@ export class DeliberationEventEmitter extends EventEmitter {
       }
       
       if (contractListeners.length === 0) {
-        this.listeners.delete(contractId);
+        this.listenersMap.delete(contractId);
       }
     }
     
@@ -71,7 +71,7 @@ export class DeliberationEventEmitter extends EventEmitter {
     this.emit(`deliberation-event:${contractId}`, event);
     
     // Call specific listeners
-    const contractListeners = this.listeners.get(contractId) || [];
+    const contractListeners = this.listenersMap.get(contractId) || [];
     contractListeners.forEach(listener => {
       try {
         this.callSpecificListener(listener, event);
@@ -131,7 +131,7 @@ export class DeliberationEventEmitter extends EventEmitter {
    * Gets active listener count
    */
   getListenerCount(contractId: string): number {
-    return (this.listeners.get(contractId) || []).length + this.listenerCount(`message:${contractId}`);
+    return (this.listenersMap.get(contractId) || []).length + this.listenerCount(`message:${contractId}`);
   }
 
   /**

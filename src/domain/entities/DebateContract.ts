@@ -28,13 +28,13 @@ export class DebateContract {
     public comments: DebateComment[],          // 모든 토론 댓글
     public readonly bettingEndTime: Date,
     public status: ContractStatus,
-    public winner?: Choice,                    // 승자 선택
     public readonly totalPoolA: number = 0,
     public readonly totalPoolB: number = 0,
     public readonly partyRewardPercentage: number,
     public readonly minBetAmount: number,
     public readonly maxBetAmount: number,
-    public readonly totalBettors: number = 0
+    public readonly totalBettors: number = 0,
+    public winner?: Choice                     // 승자 선택 (optional params must be last)
   ) {}
 
   get totalComments(): number {

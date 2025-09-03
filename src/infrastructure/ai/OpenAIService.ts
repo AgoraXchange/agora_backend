@@ -125,7 +125,7 @@ export class OpenAIService implements IAIService {
     try {
       logger.info('Calling OpenAI API for winner analysis');
       
-      const completion = await this.openai.chat.completions.create({
+      const completion = await (this.openai.chat.completions.create as any)({
         model: this.model,
         messages: [
           {
@@ -137,10 +137,11 @@ export class OpenAIService implements IAIService {
             content: prompt
           }
         ],
-        temperature: 1, // GPT-5 only supports temperature 1
-        max_completion_tokens: 8000, // Increased significantly for GPT-5 reasoning tokens + response
+        // Casting to any to allow newer params on older SDK typings
+        temperature: 1,
+        max_completion_tokens: 8000,
         response_format: { type: 'json_object' }
-      });
+      } as any);
 
       const responseText = completion.choices[0]?.message?.content;
       const finishReason = completion.choices[0]?.finish_reason;

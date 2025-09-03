@@ -89,12 +89,12 @@ export class GPT5Juror extends BaseJuror {
     `;
 
     try {
-      const response = await this.openai.chat.completions.create({
+      const response = await (this.openai.chat.completions.create as any)({
         model: this.model,
         messages: [{ role: 'user', content: prompt }],
         temperature: 1,
         max_completion_tokens: 500
-      });
+      } as any);
       
       return response.choices[0]?.message?.content || '논리적 분석 기반 판단';
     } catch (error) {

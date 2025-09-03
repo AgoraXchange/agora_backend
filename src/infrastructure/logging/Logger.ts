@@ -1,7 +1,17 @@
 import winston from 'winston';
 import path from 'path';
+import fs from 'fs';
 
-const logDir = 'logs';
+const logDir = process.env.LOG_DIR || 'logs';
+
+// Ensure log directory exists to avoid File transport crashes in containers
+try {
+  if (!fs.existsSync(logDir)) {
+    fs.mkdirSync(logDir, { recursive: true });
+  }
+} catch {
+  // If the directory cannot be created, we'll still log to console below
+}
 
 const logFormat = winston.format.combine(
   winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
@@ -29,15 +39,14 @@ const logger = winston.createLogger({
   ]
 });
 
-if (process.env.NODE_ENV !== 'production') {
-  logger.add(
-    new winston.transports.Console({
-      format: winston.format.combine(
-        winston.format.colorize(),
-        winston.format.simple()
-      )
-    })
-  );
-}
+// Always add console logging so container platforms capture logs
+logger.add(
+  new winston.transports.Console({
+    format: winston.format.combine(
+      winston.format.colorize(),
+      winston.format.simple()
+    )
+  })
+);
 
 export { logger };
