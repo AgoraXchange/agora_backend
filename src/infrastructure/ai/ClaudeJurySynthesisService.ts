@@ -18,12 +18,27 @@ export class ClaudeJurySynthesisService {
   constructor() {
     const apiKey = process.env.ANTHROPIC_API_KEY;
     this.model = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
-    this.driver = (process.env.JURY_SYNTHESIS_DRIVER as any) === 'anthropic' ? 'anthropic' : 'local';
+    
+    // Auto-enable anthropic driver if API key is available (unless explicitly set to local)
+    const driverEnv = process.env.JURY_SYNTHESIS_DRIVER;
+    if (driverEnv === 'local') {
+      this.driver = 'local';
+    } else if (driverEnv === 'anthropic' || apiKey) {
+      this.driver = 'anthropic';
+    } else {
+      this.driver = 'local';
+    }
+    
     if (apiKey && this.driver === 'anthropic') {
       this.claude = new Anthropic({ apiKey });
+      logger.info('Claude jury synthesis enabled', { model: this.model });
     } else {
-      if (!apiKey && this.driver === 'anthropic') {
+      this.claude = null;
+      if (this.driver === 'anthropic') {
         logger.warn('ANTHROPIC_API_KEY not set. Falling back to local synthesis for jury arguments.');
+        this.driver = 'local'; // Force fallback if no API key
+      } else {
+        logger.info('Using local jury synthesis (no Claude API calls)', { driver: this.driver });
       }
     }
   }
