@@ -306,6 +306,13 @@ export class OracleController {
         return;
       }
 
+      // Disable browser caching for dynamic AI-generated content
+      res.set({
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      });
+
       // Serve from cache if available
       try {
         const cache = container.get<IWinnerArgumentsCache>('IWinnerArgumentsCache');
