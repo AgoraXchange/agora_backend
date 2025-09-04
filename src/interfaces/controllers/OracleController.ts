@@ -313,15 +313,18 @@ export class OracleController {
         'Expires': '0'
       });
 
-      // Serve from cache if available
-      try {
-        const cache = container.get<IWinnerArgumentsCache>('IWinnerArgumentsCache');
-        const cached = await cache.getByContractId(String(contractId));
-        if (cached) {
-          res.status(200).json({ success: true, data: cached, cached: true });
-          return;
-        }
-      } catch {}
+      // Serve from cache if available (but allow cache bypass for debugging)
+      const bypassCache = req.query.nocache === 'true';
+      if (!bypassCache) {
+        try {
+          const cache = container.get<IWinnerArgumentsCache>('IWinnerArgumentsCache');
+          const cached = await cache.getByContractId(String(contractId));
+          if (cached) {
+            res.status(200).json({ success: true, data: cached, cached: true });
+            return;
+          }
+        } catch {}
+      }
 
       // Try to use real deliberation messages first
       let messages = emitter.getMessageHistory(String(contractId));
