@@ -6,7 +6,8 @@ import { EthereumService } from './infrastructure/blockchain/EthereumService';
 import { GracefulShutdown } from './infrastructure/GracefulShutdown';
 import { logger } from './infrastructure/logging/Logger';
 
-const PORT = process.env.PORT || 3000;
+const PORT = parseInt(process.env.PORT || '3000', 10);
+const HOST = process.env.HOST || '0.0.0.0';
 const MONITORING_INTERVAL = parseInt(process.env.MONITORING_INTERVAL || '60000');
 
 let monitoringIntervalId: NodeJS.Timeout | null = null;
@@ -22,12 +23,21 @@ async function startServer() {
 
     const app = createApp();
 
-    const server = app.listen(PORT, () => {
+    const server = app.listen(PORT, HOST, () => {
       logger.info(`Oracle server running on port ${PORT}`, {
+        host: HOST,
         environment: process.env.NODE_ENV || 'development',
         mongodb: process.env.USE_MONGODB === 'true' ? 'enabled' : 'disabled'
       });
     });
+
+    // Tune timeouts for common LBs (avoid abrupt disconnects)
+    // @ts-ignore: Node types vary across versions
+    server.keepAliveTimeout = 55000; // 55s (< typical 60s LB idle)
+    // @ts-ignore
+    server.headersTimeout = 60000;   // keepAlive + 5s safety
+    // @ts-ignore
+    server.requestTimeout = 30000;   // 30s
 
     // Setup graceful shutdown
     const gracefulShutdown = new GracefulShutdown(server);

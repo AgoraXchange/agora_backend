@@ -13,14 +13,18 @@ export interface JurySynthesisInput {
 export class ClaudeJurySynthesisService {
   private claude: Anthropic | null = null;
   private readonly model: string;
+  private readonly driver: 'local' | 'anthropic';
 
   constructor() {
     const apiKey = process.env.ANTHROPIC_API_KEY;
     this.model = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
-    if (apiKey) {
+    this.driver = (process.env.JURY_SYNTHESIS_DRIVER as any) === 'anthropic' ? 'anthropic' : 'local';
+    if (apiKey && this.driver === 'anthropic') {
       this.claude = new Anthropic({ apiKey });
     } else {
-      logger.warn('ANTHROPIC_API_KEY not set. Falling back to local synthesis for jury arguments.');
+      if (!apiKey && this.driver === 'anthropic') {
+        logger.warn('ANTHROPIC_API_KEY not set. Falling back to local synthesis for jury arguments.');
+      }
     }
   }
 
@@ -70,15 +74,21 @@ Available supporting items:
 ${capped.map((s, i) => `#${i + 1} Agent=${s.agent}\nRationale=${s.rationale}\nEvidence=${s.evidence.join(' | ')}`).join('\n\n')}
 `;
 
-    if (this.claude) {
+    if (this.claude && this.driver === 'anthropic') {
       try {
-        const resp = await this.claude.messages.create({
+        const timeoutMs = parseInt(process.env.AI_REQUEST_TIMEOUT_MS || '30000', 10);
+        const aiCall = this.claude.messages.create({
           model: this.model,
-          max_tokens: 6000,
+          max_tokens: 1200,
           temperature: 0.2,
           system: header,
           messages: [ { role: 'user', content: instructions } ]
         });
+
+        const resp = await Promise.race([
+          aiCall,
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('AI request timeout')), timeoutMs))
+        ]);
 
         const first = resp.content?.[0];
         const text = first && (first.type === 'text') ? first.text : '';
@@ -91,7 +101,7 @@ ${capped.map((s, i) => `#${i + 1} Agent=${s.agent}\nRationale=${s.rationale}\nEv
         logger.warn('Claude jury synthesis returned unrecognized JSON, using fallback parse', { contractId });
         return this.fallbackFromEvidence(capped, winnerId, input.locale);
       } catch (error) {
-        logger.error('Claude jury synthesis failed, using local fallback', {
+        logger.warn('Claude jury synthesis failed, using local fallback', {
           contractId,
           error: error instanceof Error ? error.message : 'Unknown error'
         });
@@ -99,6 +109,10 @@ ${capped.map((s, i) => `#${i + 1} Agent=${s.agent}\nRationale=${s.rationale}\nEv
       }
     }
 
+    if (this.driver !== 'anthropic') {
+      // Intentionally local-only mode; avoid noisy logs
+      return this.fallbackFromEvidence(capped, winnerId, input.locale);
+    }
     return this.fallbackFromEvidence(capped, winnerId, input.locale);
   }
 
@@ -145,4 +159,3 @@ ${capped.map((s, i) => `#${i + 1} Agent=${s.agent}\nRationale=${s.rationale}\nEv
     };
   }
 }
-

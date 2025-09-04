@@ -6,13 +6,28 @@ import { createOracleRoutes } from './interfaces/routes/oracleRoutes';
 import { createAuthRoutes } from './interfaces/routes/authRoutes';
 import { createDeliberationRoutes } from './interfaces/routes/deliberationRoutes';
 import { errorHandler, notFoundHandler } from './interfaces/middleware/errorMiddleware';
-import { apiRateLimiter } from './interfaces/middleware/rateLimitMiddleware';
+import { apiRateLimiter, xffBypassMiddleware } from './interfaces/middleware/rateLimitMiddleware';
 import { logger } from './infrastructure/logging/Logger';
 
 dotenv.config();
 
 export function createApp() {
   const app = express();
+
+  // Configure trust proxy before any middleware that relies on req.ip (e.g., rate limiters)
+  // Use TRUST_PROXY env if provided, otherwise default to trusting 1 proxy in non-dev envs
+  const trustProxyEnv = process.env.TRUST_PROXY;
+  if (typeof trustProxyEnv !== 'undefined') {
+    let trustValue: any = trustProxyEnv;
+    if (trustProxyEnv === 'true') trustValue = true;
+    else if (trustProxyEnv === 'false') trustValue = false;
+    else if (/^\d+$/.test(trustProxyEnv)) trustValue = parseInt(trustProxyEnv, 10);
+    app.set('trust proxy', trustValue);
+    logger.info('Express trust proxy configured from env', { value: trustValue });
+  } else if ((process.env.NODE_ENV || 'development') !== 'development') {
+    app.set('trust proxy', 1);
+    logger.info('Express trust proxy set to 1 (production default)');
+  }
 
   // Security middleware
   app.use(helmet({
@@ -41,12 +56,50 @@ export function createApp() {
     .filter(o => o.length > 0);
   const allowedOrigins = envOrigins.length > 0 ? envOrigins : defaultDevOrigins;
 
+  const originPatterns = (process.env.ALLOWED_ORIGINS_REGEX || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean)
+    .map(s => {
+      try {
+        return new RegExp(s);
+      } catch {
+        logger.warn('Invalid ALLOWED_ORIGINS_REGEX pattern ignored', { pattern: s });
+        return null;
+      }
+    })
+    .filter((r): r is RegExp => !!r);
+
+  const wildcardToRegex = (pattern: string): RegExp => {
+    // Escape regex meta except '*', then convert '*' to '.*'
+    const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+    return new RegExp('^' + escaped.replace(/\/$/, '') + '$');
+  };
+
+  const isOriginAllowed = (origin: string): boolean => {
+    const clean = origin.replace(/\/$/, '');
+    if (allowedOrigins.some(o => o.replace(/\/$/, '') === clean)) return true;
+    // wildcard support like https://*.example.com
+    for (const o of allowedOrigins) {
+      if (o.includes('*')) {
+        const re = wildcardToRegex(o);
+        if (re.test(clean)) return true;
+      }
+    }
+    if (originPatterns.some(re => re.test(clean))) return true;
+    return false;
+  };
+
   const corsOptions: CorsOptions = {
     origin: (origin, callback) => {
       // Allow same-origin/non-browser requests
       if (!origin) return callback(null, true);
 
-      if (allowedOrigins.includes(origin)) return callback(null, true);
+      const allowed = isOriginAllowed(origin);
+      if (process.env.CORS_DEBUG === 'true') {
+        logger.info('CORS origin check', { origin, allowed });
+      }
+      if (allowed) return callback(null, true);
 
       // Lenient localhost in non-production
       if ((process.env.NODE_ENV || 'development') !== 'production') {
@@ -54,6 +107,7 @@ export function createApp() {
         if (isLocalhost) return callback(null, true);
       }
 
+      logger.warn('CORS blocked origin', { origin });
       callback(new Error(`CORS: Origin not allowed: ${origin}`));
     },
     credentials: true,
@@ -67,9 +121,32 @@ export function createApp() {
   // Ensure preflight requests are handled
   app.options('*', cors(corsOptions));
 
+  // Extra-fast preflight handler (belt-and-suspenders) before any heavy middleware
+  app.use((req, res, next) => {
+    if (req.method !== 'OPTIONS') return next();
+    const origin = req.headers.origin as string | undefined;
+    if (!origin) return res.sendStatus(204);
+    const allowed = isOriginAllowed(origin) || ((process.env.NODE_ENV || 'development') !== 'production' && /^https?:\/\/(localhost|127\.0\.0\.1)(:\\d+)?$/.test(origin));
+    if (process.env.CORS_DEBUG === 'true') {
+      logger.info('Fast preflight', { origin, allowed });
+    }
+    if (!allowed) return res.status(403).send('CORS preflight blocked');
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+    const reqHeaders = (req.headers['access-control-request-headers'] as string | undefined) || 'Content-Type, Authorization, Accept, Origin, X-Requested-With';
+    res.setHeader('Access-Control-Allow-Headers', reqHeaders);
+    res.setHeader('Access-Control-Max-Age', '86400');
+    return res.sendStatus(204);
+  });
+
   // Body parser middleware
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+  // Pre-process X-Forwarded-For if trust proxy is disabled to avoid express-rate-limit validation errors
+  app.use(xffBypassMiddleware);
 
   // Global rate limiting
   app.use(apiRateLimiter);
@@ -86,6 +163,13 @@ export function createApp() {
   });
 
   // Health check route
+  app.get('/', (_req, res) => {
+    res.json({ status: 'ok', service: 'agora-oracle', path: '/' });
+  });
+
+  app.head('/', (_req, res) => res.sendStatus(200));
+  app.head('/health', (_req, res) => res.sendStatus(200));
+
   app.get('/health', (req, res) => {
     res.json({ 
       status: 'ok', 
