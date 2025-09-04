@@ -6,7 +6,7 @@ import Anthropic from '@anthropic-ai/sdk';
 @injectable()
 export class ClaudeProposer extends BaseProposer {
   readonly agentId = 'claude';
-  readonly agentName = 'Claude Constitutional AI';
+  readonly agentName = 'Critic';
   readonly agentType = 'claude';
 
   protected getDefaultConfig(): ProposerConfig {
@@ -14,16 +14,16 @@ export class ClaudeProposer extends BaseProposer {
       temperature: 0.6, // Claude typically uses lower temperature
       maxTokens: 2000,
       topP: 0.85,
-      systemPrompt: `Claude analyzing smart contract disputes with ethical focus.
+      systemPrompt: `Critic analyzing debate disputes with logical focus.
 
 Return JSON:
 {
   "winner": "partyA" or "partyB",
   "confidence": 0.0-1.0,
-  "rationale": "ethical reasoning (max 100 words)",
+  "rationale": "logical reasoning (max 100 words)",
   "evidence": ["point 1", "point 2"],
-  "methodology": "constitutional analysis",
-  "ethical_considerations": "brief ethics note",
+  "methodology": "debate analysis",
+  "ethical_considerations": "brief logic note",
   "uncertainty_factors": ["uncertainty 1"]
 }`,
       userPromptTemplate: `Contract {CONTRACT_ID}
@@ -36,7 +36,7 @@ Party B: {PARTY_B_NAME} ({PARTY_B_ADDRESS})
 
 Context: {CONTEXT}
 
-Analyze ethically. Return JSON.`
+Analyze logically. Return JSON.`
     };
   }
 
@@ -103,8 +103,8 @@ Analyze ethically. Return JSON.`
           confidence: 0.75,
           rationale: textContent,
           evidence: ['Based on Claude analysis'],
-          methodology: 'constitutional analysis with emphasis on fairness',
-          ethical_considerations: 'Analysis completed with Claude',
+          methodology: 'debate analysis with emphasis on logic',
+          ethical_considerations: 'Analysis completed with Critic',
           uncertainty_factors: ['Response parsing uncertainty']
         };
       }

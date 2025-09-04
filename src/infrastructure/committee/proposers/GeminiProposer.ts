@@ -14,7 +14,7 @@ export class GeminiProposer extends BaseProposer {
       temperature: 0.8, // Gemini can handle higher temperature well
       maxTokens: 4000, // Increased to prevent truncation
       topP: 0.95,
-      systemPrompt: `Analyze contract dispute. Return concise JSON:
+      systemPrompt: `Analyze debate dispute. Return concise JSON:
 {
   "winner": "partyA" or "partyB",
   "confidence": 0.0-1.0,

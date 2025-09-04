@@ -1,6 +1,6 @@
 import express from 'express';
 import helmet from 'helmet';
-import cors from 'cors';
+import cors, { CorsOptions } from 'cors';
 import dotenv from 'dotenv';
 import { createOracleRoutes } from './interfaces/routes/oracleRoutes';
 import { createAuthRoutes } from './interfaces/routes/authRoutes';
@@ -26,21 +26,46 @@ export function createApp() {
     },
   }));
 
-  // CORS configuration
-  app.use(cors({
-    origin: process.env.ALLOWED_ORIGINS?.split(',') || [
-      'http://localhost:3000',
-      'http://localhost:5173', // Vite frontend default
-      'http://localhost:5174', // Vite frontend alternative port
-      'http://127.0.0.1:5173', // Alternative localhost
-      'http://127.0.0.1:5174'  // Alternative localhost with alt port
-    ],
+  // CORS configuration (robust origin parsing + flexible headers)
+  const defaultDevOrigins = [
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'http://localhost:5174',
+    'http://127.0.0.1:5173',
+    'http://127.0.0.1:5174'
+  ];
+  const rawOrigins = process.env.ALLOWED_ORIGINS || '';
+  const envOrigins = rawOrigins
+    .split(',')
+    .map(o => o.trim())
+    .filter(o => o.length > 0);
+  const allowedOrigins = envOrigins.length > 0 ? envOrigins : defaultDevOrigins;
+
+  const corsOptions: CorsOptions = {
+    origin: (origin, callback) => {
+      // Allow same-origin/non-browser requests
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+
+      // Lenient localhost in non-production
+      if ((process.env.NODE_ENV || 'development') !== 'production') {
+        const isLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1)(:\\d+)?$/.test(origin);
+        if (isLocalhost) return callback(null, true);
+      }
+
+      callback(new Error(`CORS: Origin not allowed: ${origin}`));
+    },
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    // Let cors reflect requested headers automatically by not fixing allowedHeaders
     exposedHeaders: ['Content-Length', 'X-Request-ID'],
-    maxAge: 86400, // 24 hours preflight cache
-  }));
+    maxAge: 86400
+  };
+
+  app.use(cors(corsOptions));
+  // Ensure preflight requests are handled
+  app.options('*', cors(corsOptions));
 
   // Body parser middleware
   app.use(express.json({ limit: '10mb' }));

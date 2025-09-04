@@ -10,7 +10,7 @@ import { logger } from '../../logging/Logger';
 @injectable()
 export class GPT5Juror extends BaseJuror {
   readonly jurorId: JurorId = 'gpt5';
-  readonly jurorName = 'GPT-5 논리분석관';
+  readonly jurorName = 'GPT-5 Logical Analyst';
   
   readonly personality: JurorPersonality = {
     analyticalDepth: 0.95,      // 매우 깊은 분석
@@ -41,7 +41,7 @@ export class GPT5Juror extends BaseJuror {
   }
 
   protected evaluateArgument(analysis: ArgumentAnalysis): EvaluationCriteria {
-    // GPT-5는 논리적 오류에 매우 엄격
+    // GPT-5 is highly strict about logical fallacies
     const logicalStrength = analysis.calculateLogicalStrength();
     
     // 논리적 오류 패널티 적용
@@ -71,21 +71,21 @@ export class GPT5Juror extends BaseJuror {
     evaluationB: EvaluationCriteria
   ): Promise<string> {
     const prompt = `
-    당신은 엄격한 논리 분석가입니다.
+    You are a strict logical analyst.
     
-    A 주장 평가:
-    - 전제 타당성: ${evaluationA.premiseValidity}
-    - 논리 일관성: ${evaluationA.logicalCoherence}
-    - 증거 강도: ${evaluationA.evidenceStrength}
+    Evaluation of Claim A:
+    - Premise validity: ${evaluationA.premiseValidity}
+    - Logical coherence: ${evaluationA.logicalCoherence}
+    - Evidence strength: ${evaluationA.evidenceStrength}
     
-    B 주장 평가:
-    - 전제 타당성: ${evaluationB.premiseValidity}
-    - 논리 일관성: ${evaluationB.logicalCoherence}
-    - 증거 강도: ${evaluationB.evidenceStrength}
+    Evaluation of Claim B:
+    - Premise validity: ${evaluationB.premiseValidity}
+    - Logical coherence: ${evaluationB.logicalCoherence}
+    - Evidence strength: ${evaluationB.evidenceStrength}
     
-    결정: ${position}
+    Decision: ${position}
     
-    논리적 근거를 200자 이내로 설명하시오. 형식 논리와 연역적 추론을 중시하시오.
+    Briefly explain (within 200 characters) the logical rationale. Emphasize formal logic and deductive reasoning.
     `;
 
     try {
@@ -96,12 +96,12 @@ export class GPT5Juror extends BaseJuror {
         max_completion_tokens: 500
       } as any);
       
-      return response.choices[0]?.message?.content || '논리적 분석 기반 판단';
+      return response.choices[0]?.message?.content || 'Decision based on logical analysis';
     } catch (error) {
       logger.error('GPT-5 reasoning generation failed', {
         error: error instanceof Error ? error.message : 'Unknown error'
       });
-      return '논리적 타당성 기준으로 평가';
+      return 'Evaluation based on logical validity';
     }
   }
 
@@ -109,9 +109,9 @@ export class GPT5Juror extends BaseJuror {
     other: JurorOpinion,
     mine: JurorOpinion
   ): Promise<string> {
-    return `${other.jurorName}의 분석에 동의합니다. 특히 전제 타당성 ${
+    return `I agree with ${other.jurorName}'s analysis. In particular, the premise validity assessment of ${
       (other.evaluationCriteria.premiseValidity * 100).toFixed(0)
-    }% 평가가 정확합니다. 논리적 일관성 측면에서도 타당한 결론입니다.`;
+    }% is accurate. The conclusion is also sound in terms of logical coherence.`;
   }
 
   protected async generateChallengeStatement(
@@ -124,43 +124,43 @@ export class GPT5Juror extends BaseJuror {
         ? '논리적 일관성' 
         : '증거의 신뢰성';
     
-    return `${other.jurorName}의 판단에 이의를 제기합니다. ${weakPoint}이 불충분합니다. 
-    제 분석으로는 ${mine.currentPosition} 주장이 논리적으로 ${
+    return `I challenge ${other.jurorName}'s judgment. ${weakPoint} is insufficient.
+    According to my analysis, the ${mine.currentPosition} position is ${
       (mine.confidenceLevel * 100).toFixed(0)
-    }% 더 타당합니다. 형식 논리상 명백한 우위가 있습니다.`;
+    }% more logically valid. There is a clear advantage in formal logic.`;
   }
 
   protected async generateQuestionStatement(
     other: JurorOpinion,
     mine: JurorOpinion
   ): Promise<string> {
-    return `${other.jurorName}님, ${other.currentPosition} 주장의 논리적 비약은 어떻게 설명하시겠습니까? 
-    전제에서 결론으로의 연역 과정이 불명확해 보입니다.`;
+    return `${other.jurorName}, how do you account for the logical leap in the ${other.currentPosition} position?
+    The deduction from premises to conclusion appears unclear.`;
   }
 
   protected async generateClarificationQuestion(other: JurorOpinion): Promise<string> {
-    return `${other.jurorName}님, 해당 주장의 필요충분조건을 명확히 해주시겠습니까? 
-    논리적 함의 관계를 더 구체적으로 설명 부탁드립니다.`;
+    return `${other.jurorName}, could you clarify the necessary and sufficient conditions for that claim?
+    Please explain the logical implication relations more concretely.`;
   }
 
   protected async generateResistanceStatement(
     argument: JuryDiscussion,
     mine: JurorOpinion
   ): Promise<string> {
-    return `${argument.speakerName}의 지적을 검토했으나, 논리적 오류가 있습니다. 
-    제 분석의 형식 논리적 타당성은 변하지 않습니다. 
-    ${mine.currentPosition} 주장의 연역적 우위가 여전히 명확합니다.`;
+    return `I have reviewed ${argument.speakerName}'s point, but there are logical errors.
+    The formal logical validity of my analysis remains unchanged.
+    The deductive superiority of the ${mine.currentPosition} position is still clear.`;
   }
 
   protected async generateAnswer(
     question: JuryDiscussion,
     mine: JurorOpinion
   ): Promise<string> {
-    return `${question.speakerName}의 질문에 답변드립니다. 
-    제 판단의 논리적 근거는 다음과 같습니다:
-    1. 전제 타당성: ${(mine.evaluationCriteria.premiseValidity * 100).toFixed(0)}%
-    2. 논리 일관성: ${(mine.evaluationCriteria.logicalCoherence * 100).toFixed(0)}%
-    3. 형식 논리상 모순이 없음
-    따라서 ${mine.currentPosition} 주장이 타당합니다.`;
+    return `In response to ${question.speakerName}'s question:
+    The logical basis of my judgment is as follows:
+    1) Premise validity: ${(mine.evaluationCriteria.premiseValidity * 100).toFixed(0)}%
+    2) Logical coherence: ${(mine.evaluationCriteria.logicalCoherence * 100).toFixed(0)}%
+    3) No contradictions under formal logic
+    Therefore, the ${mine.currentPosition} position is valid.`;
   }
 }
