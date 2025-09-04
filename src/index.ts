@@ -66,6 +66,14 @@ async function startServer() {
       }
     });
 
+    gracefulShutdown.registerShutdownCallback(async () => {
+      if (process.env.USE_MONGODB === 'true') {
+        logger.info('Disconnecting from MongoDB...');
+        const mongoConnection = container.get<MongoDBConnection>('MongoDBConnection');
+        await mongoConnection.disconnect();
+      }
+    });
+
     // Start contract monitoring
     startContractMonitoring();
   } catch (error) {
