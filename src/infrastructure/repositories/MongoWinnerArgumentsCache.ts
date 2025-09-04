@@ -24,7 +24,6 @@ export class MongoWinnerArgumentsCache implements IWinnerArgumentsCache {
   }
 
   private async ensureIndexes(): Promise<void> {
-    await this.collection.createIndex({ _id: 1 }, { unique: true });
     if (this.ttlSeconds && this.ttlSeconds > 0) {
       await this.collection.createIndex({ createdAt: 1 }, { expireAfterSeconds: this.ttlSeconds });
     }
