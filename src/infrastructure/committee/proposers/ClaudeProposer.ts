@@ -41,7 +41,8 @@ Analyze logically. Return JSON.`
   }
 
   protected getModelName(): string {
-    return process.env.CLAUDE_MODEL || 'claude-3-sonnet';
+    // Prefer ANTHROPIC_MODEL for consistency with env; fallback to CLAUDE_MODEL
+    return process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || 'claude-3-sonnet';
   }
 
   protected async callAIModel(prompt: string, temperature: number): Promise<{
@@ -54,7 +55,8 @@ Analyze logically. Return JSON.`
     rawResponse: any;
   }> {
     // Check if we should use mock mode
-    const apiKey = process.env.CLAUDE_API_KEY;
+    // Support both CLAUDE_API_KEY and ANTHROPIC_API_KEY (preferred)
+    const apiKey = process.env.CLAUDE_API_KEY || process.env.ANTHROPIC_API_KEY;
     
     if (!apiKey || apiKey === 'mock' || apiKey.includes('mock_claude')) {
       logger.debug('Using mock Claude response (mock mode enabled)');
@@ -69,7 +71,7 @@ Analyze logically. Return JSON.`
       });
 
       // Implement real Claude API call
-      const anthropic = new Anthropic({ apiKey: process.env.CLAUDE_API_KEY });
+      const anthropic = new Anthropic({ apiKey });
       
       const message = await anthropic.messages.create({
         model: this.getModelName(),

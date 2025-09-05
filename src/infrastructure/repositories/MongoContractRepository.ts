@@ -47,7 +47,37 @@ export class MongoContractRepository implements IContractRepository {
 
   private async createIndexes(): Promise<void> {
     try {
-      await this.collection.createIndex({ contractAddress: 1 }, { unique: true });
+      // Ensure contractAddress is NOT unique because many logical contracts share the same main contract address
+      try {
+        const indexes = await this.collection.indexes();
+        const addrIdx = indexes.find((i: any) => i.name === 'contractAddress_1');
+        if (addrIdx?.unique) {
+          try {
+            await this.collection.dropIndex('contractAddress_1');
+            logger.warn('Dropped unique index contractAddress_1 to allow multiple contracts per address');
+          } catch (dropErr) {
+            logger.warn('Failed to drop unique index contractAddress_1 (may not exist)', { error: dropErr instanceof Error ? dropErr.message : String(dropErr) });
+          }
+        }
+      } catch (inspectErr) {
+        logger.debug('Could not inspect indexes for contracts collection', { error: inspectErr instanceof Error ? inspectErr.message : 'unknown' });
+      }
+      // Create a non-unique index for query performance
+      try {
+        await this.collection.createIndex({ contractAddress: 1 }, { unique: false, name: 'contractAddress_1' });
+      } catch (createErr) {
+        logger.debug('contractAddress index creation skipped/failed (likely already exists)', { error: createErr instanceof Error ? createErr.message : 'unknown' });
+      }
+      // Add compound unique index: (contractAddress, _id)
+      try {
+        await this.collection.createIndex(
+          { contractAddress: 1, _id: 1 },
+          { unique: true, name: 'contractAddress_1__id_1_unique' }
+        );
+        logger.info('Ensured compound unique index on (contractAddress, _id)');
+      } catch (cmpErr) {
+        logger.debug('Compound unique index creation skipped/failed (likely already exists)', { error: cmpErr instanceof Error ? cmpErr.message : 'unknown' });
+      }
       await this.collection.createIndex({ status: 1, bettingEndTime: 1 });
       await this.collection.createIndex({ winnerId: 1 });
       logger.info('MongoDB indexes created for contracts collection');
@@ -89,7 +119,8 @@ export class MongoContractRepository implements IContractRepository {
 
   async save(contract: Contract): Promise<void> {
     const doc = this.entityToDocument(contract);
-    await this.collection.insertOne(doc);
+    // Use upsert to be idempotent under concurrent markEnded calls
+    await this.collection.replaceOne({ _id: contract.id }, doc, { upsert: true });
     logger.info('Contract saved', { contractId: contract.id });
   }
 
