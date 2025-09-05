@@ -14,6 +14,22 @@ dotenv.config();
 export function createApp() {
   const app = express();
 
+  // Trust proxy configuration (for correct client IPs behind load balancers)
+  // TRUST_PROXY can be: number (hops), 'true'/'false', or subnet list
+  const trustProxyEnv = process.env.TRUST_PROXY;
+  if (typeof trustProxyEnv !== 'undefined') {
+    const lower = trustProxyEnv.toLowerCase();
+    if (lower === 'true' || lower === 'false') {
+      app.set('trust proxy', lower === 'true');
+    } else if (!isNaN(Number(trustProxyEnv))) {
+      app.set('trust proxy', Number(trustProxyEnv));
+    } else {
+      // Allow passing subnet/CSV per Express semantics
+      app.set('trust proxy', trustProxyEnv);
+    }
+    logger.info('Express trust proxy configured', { value: trustProxyEnv });
+  }
+
   // Security middleware
   app.use(helmet({
     contentSecurityPolicy: {

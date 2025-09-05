@@ -7,6 +7,7 @@ export const createRateLimiter = (
   max: number = 100,
   message: string = 'Too many requests from this IP, please try again later'
 ) => {
+  const allowXffWithoutTrust = (process.env.ERL_ALLOW_XFF_WITHOUT_TRUST_PROXY || 'false').toLowerCase() === 'true';
   return rateLimit({
     windowMs,
     max,
@@ -17,6 +18,13 @@ export const createRateLimiter = (
     },
     standardHeaders: true,
     legacyHeaders: false,
+    // Avoid throwing when X-Forwarded-For is present but trust proxy is not enabled
+    // See ERR_ERL_UNEXPECTED_X_FORWARDED_FOR
+    // Cast to any for compatibility with different express-rate-limit typings
+    validate: {
+      // Disable only this specific validation when explicitly allowed by env
+      xForwardedForHeader: allowXffWithoutTrust ? false : true
+    } as any,
     handler: (req: Request, res: Response) => {
       logger.warn('Rate limit exceeded', { 
         ip: req.ip,
