@@ -26,6 +26,7 @@ export class ClaudeJurySynthesisService {
 
   async generate(input: JurySynthesisInput): Promise<WinnerJuryArguments> {
     const { winnerId, messages, contractId } = input;
+    const winnerLabel = this.toPartyLabel(winnerId);
 
     const supporting = messages
       .filter(m => m.messageType === 'proposal' && m.content?.winner === winnerId)
@@ -59,7 +60,7 @@ export class ClaudeJurySynthesisService {
     const header = `You are a careful logician. Build three distinct logical arguments that support the chosen winner using the provided evidence. Then derive a concise conclusion that follows inevitably from those arguments. Output strict JSON only.`;
     const instructions = `
 Task:
-- Winner: ${winnerId}
+- Winner: ${winnerLabel}
 - Use only the provided rationales/evidence as sources; avoid assumptions.
 - Each of Jury1/2/3 should be a single, self-contained argument supported by one or more evidence pieces.
 - Conclusion must logically follow from Jury1–Jury3 without introducing new facts.
@@ -89,17 +90,31 @@ ${capped.map((s, i) => `#${i + 1} Agent=${s.agent}\nRationale=${s.rationale}\nEv
         }
 
         logger.warn('Claude jury synthesis returned unrecognized JSON, using fallback parse', { contractId });
-        return this.fallbackFromEvidence(capped, winnerId, input.locale);
+        return this.fallbackFromEvidence(capped, winnerLabel, input.locale);
       } catch (error) {
         logger.error('Claude jury synthesis failed, using local fallback', {
           contractId,
           error: error instanceof Error ? error.message : 'Unknown error'
         });
-        return this.fallbackFromEvidence(capped, winnerId, input.locale);
+        return this.fallbackFromEvidence(capped, winnerLabel, input.locale);
       }
     }
 
-    return this.fallbackFromEvidence(capped, winnerId, input.locale);
+    return this.fallbackFromEvidence(capped, winnerLabel, input.locale);
+  }
+
+  // Map internal winnerId (e.g., "11:1" or "11:2") to a symbolic party label expected by the prompt
+  private toPartyLabel(winnerId: string): 'partyA' | 'partyB' {
+    if (!winnerId) return 'partyA';
+    const id = String(winnerId).toLowerCase();
+    if (id === 'partya' || id === 'a') return 'partyA';
+    if (id === 'partyb' || id === 'b') return 'partyB';
+    const m = id.match(/:(\d+)$/);
+    if (m) {
+      const idx = parseInt(m[1], 10);
+      return idx === 2 ? 'partyB' : 'partyA';
+    }
+    return 'partyA';
   }
 
   private safeParseJSON(raw: string): any {
@@ -145,4 +160,3 @@ ${capped.map((s, i) => `#${i + 1} Agent=${s.agent}\nRationale=${s.rationale}\nEv
     };
   }
 }
-

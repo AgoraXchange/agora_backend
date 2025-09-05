@@ -10,7 +10,7 @@ import { logger } from '../../logging/Logger';
 @injectable()
 export class ClaudeJuror extends BaseJuror {
   readonly jurorId: JurorId = 'claude';
-  readonly jurorName = 'Claude 맥락해석관';
+  readonly jurorName = 'Claude Context Analyst';
   
   readonly personality: JurorPersonality = {
     analyticalDepth: 0.8,       // 깊은 분석
@@ -72,16 +72,16 @@ export class ClaudeJuror extends BaseJuror {
     evaluationB: EvaluationCriteria
   ): Promise<string> {
     const prompt = `
-    당신은 맥락을 중시하는 분석가입니다.
+    You are an analyst who prioritizes context and practical implications.
     
-    A 주장의 맥락적 강점: ${report.argumentAAnalysis.keyInsights.slice(0, 2).join(', ')}
-    B 주장의 맥락적 강점: ${report.argumentBAnalysis.keyInsights.slice(0, 2).join(', ')}
+    Contextual strengths of A: ${report.argumentAAnalysis.keyInsights.slice(0, 2).join(', ')}
+    Contextual strengths of B: ${report.argumentBAnalysis.keyInsights.slice(0, 2).join(', ')}
     
-    중립적 발견: ${report.neutralFindings.slice(0, 2).join(', ')}
+    Neutral findings: ${report.neutralFindings.slice(0, 2).join(', ')}
     
-    결정: ${position}
+    Decision: ${position}
     
-    맥락과 실용성을 고려한 판단 근거를 200자 이내로 설명하시오.
+    In 200 characters or fewer, explain the reasoning that considers context and practicality.
     `;
 
     try {
@@ -93,13 +93,13 @@ export class ClaudeJuror extends BaseJuror {
       });
       
       const content = response.content[0];
-      return content.type === 'text' ? content.text : '맥락적 분석 기반 판단';
+      return content.type === 'text' ? content.text : 'Judgment based on contextual analysis';
       
     } catch (error) {
       logger.error('Claude reasoning generation failed', {
         error: error instanceof Error ? error.message : 'Unknown error'
       });
-      return '맥락과 실용성을 고려한 종합적 판단';
+      return 'Comprehensive judgment considering context and practicality';
     }
   }
 
@@ -107,52 +107,52 @@ export class ClaudeJuror extends BaseJuror {
     other: JurorOpinion,
     mine: JurorOpinion
   ): Promise<string> {
-    return `${other.jurorName}의 견해에 공감합니다. 특히 ${
-      other.keyArguments[0] || '핵심 논점'
-    }은 중요한 통찰입니다. 
-    맥락적으로 볼 때 ${other.currentPosition} 주장이 더 현실적이고 실행 가능해 보입니다.`;
+    return `I agree with ${other.jurorName}'s view. In particular, ${
+      other.keyArguments[0] || 'the key point'
+    } offers an important insight. 
+    From a contextual perspective, the ${other.currentPosition} stance appears more realistic and feasible.`;
   }
 
   protected async generateChallengeStatement(
     other: JurorOpinion,
     mine: JurorOpinion
   ): Promise<string> {
-    return `${other.jurorName}님, 논리적 타당성은 인정하지만 맥락을 놓치고 계신 것 같습니다. 
-    실제 상황에서는 ${mine.currentPosition} 주장이 더 적절합니다. 
-    특히 ${mine.keyArguments[0] || '핵심 요소'}를 고려하면 실용적 관점에서 명확한 차이가 있습니다.`;
+    return `${other.jurorName}, I acknowledge the logical validity, but it seems the context is being missed. 
+    In real situations, the ${mine.currentPosition} stance is more appropriate. 
+    Especially considering ${mine.keyArguments[0] || 'the critical factor'}, there is a clear difference in practical terms.`;
   }
 
   protected async generateQuestionStatement(
     other: JurorOpinion,
     mine: JurorOpinion
   ): Promise<string> {
-    return `${other.jurorName}님, ${other.currentPosition} 주장의 실제 적용 가능성은 어떻게 보십니까? 
-    이론적으로는 타당할 수 있지만, 현실적 제약을 고려하셨는지 궁금합니다.`;
+    return `${other.jurorName}, how do you assess the real-world feasibility of the ${other.currentPosition} stance? 
+    It may be theoretically sound, but have you considered practical constraints?`;
   }
 
   protected async generateClarificationQuestion(other: JurorOpinion): Promise<string> {
-    return `${other.jurorName}님, 해당 판단의 맥락적 배경을 더 자세히 설명해 주시겠습니까? 
-    특히 실무적 함의나 현실적 제약 사항이 있다면 듣고 싶습니다.`;
+    return `${other.jurorName}, could you elaborate on the contextual background of your judgment? 
+    I would especially like to hear any operational implications or real-world constraints involved.`;
   }
 
   protected async generateResistanceStatement(
     argument: JuryDiscussion,
     mine: JurorOpinion
   ): Promise<string> {
-    return `${argument.speakerName}의 의견을 경청했습니다. 
-    하지만 전체적인 맥락을 고려할 때 여전히 ${mine.currentPosition} 주장이 더 균형 잡혀 있습니다. 
-    실용적 관점과 이론적 타당성을 모두 고려한 결과입니다.`;
+    return `I have carefully considered ${argument.speakerName}'s opinion. 
+    However, considering the overall context, the ${mine.currentPosition} stance remains more balanced. 
+    This conclusion reflects both practical considerations and theoretical soundness.`;
   }
 
   protected async generateAnswer(
     question: JuryDiscussion,
     mine: JurorOpinion
   ): Promise<string> {
-    return `${question.speakerName}의 질문에 답변드립니다. 
-    제 판단은 다음 맥락적 요소들을 종합한 것입니다:
-    1. 실제 적용 가능성: ${(mine.evaluationCriteria.probabilityScore * 100).toFixed(0)}%
-    2. 맥락적 적절성: ${(mine.evaluationCriteria.logicalCoherence * 100).toFixed(0)}%
-    3. 현실적 제약 고려
-    이러한 요소들을 균형 있게 고려했을 때 ${mine.currentPosition}가 더 타당합니다.`;
+    return `Answering ${question.speakerName}'s question. 
+    My judgment synthesizes the following contextual factors:
+    1) Real-world feasibility: ${(mine.evaluationCriteria.probabilityScore * 100).toFixed(0)}%
+    2) Contextual appropriateness: ${(mine.evaluationCriteria.logicalCoherence * 100).toFixed(0)}%
+    3) Consideration of practical constraints
+    Weighing these factors, the ${mine.currentPosition} stance is more justified.`;
   }
 }

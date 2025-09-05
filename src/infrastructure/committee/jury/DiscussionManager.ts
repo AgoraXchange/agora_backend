@@ -21,10 +21,10 @@ export class DiscussionManager {
     });
 
     try {
-      // 1. 발언 순서 결정 (신뢰도 낮은 순 - 불확실한 사람이 먼저 질문)
+      // 1. Determine speaking order (lower confidence first - uncertain jurors ask first)
       const speakingOrder = this.determineSpeakingOrder(jurors);
       
-      // 2. 각 배심원 순차 발언
+      // 2. Each juror speaks in order
       for (const speaker of speakingOrder) {
         const speakerInstance = jurorInstances.get(speaker.jurorId);
         if (!speakerInstance) continue;
@@ -40,7 +40,7 @@ export class DiscussionManager {
           const listenerInstance = jurorInstances.get(listener.jurorId);
           if (!listenerInstance) continue;
           
-          // 의견 차이가 있을 때 상호작용
+          // Interact when there is a difference of opinion
           if (this.shouldInteract(speaker, listener)) {
             const interaction = await speakerInstance.respondToOpinion(listener, speaker);
             discussions.push(interaction);
@@ -57,7 +57,7 @@ export class DiscussionManager {
         }
       }
       
-      // 3. 추가 설득 시도 (의견 불일치 시)
+      // 3. Additional persuasion attempts (when opinions differ)
       if (!this.isUnanimous(jurors) && round > 1) {
         const persuasions = await this.generatePersuasionAttempts(
           jurors, 
@@ -67,7 +67,7 @@ export class DiscussionManager {
         discussions.push(...persuasions);
       }
       
-      // 4. 질문 라운드 (아직 결정하지 못한 배심원이 있을 때)
+      // 4. Question round (if there are undecided jurors)
       const undecidedJurors = jurors.filter(j => j.currentPosition === 'UNDECIDED');
       if (undecidedJurors.length > 0) {
         const questions = await this.generateQuestions(
@@ -96,7 +96,7 @@ export class DiscussionManager {
   }
   
   private determineSpeakingOrder(jurors: JurorOpinion[]): JurorOpinion[] {
-    // 신뢰도가 낮은 순으로 정렬 (불확실한 사람이 먼저 발언)
+    // Sort by lower confidence first (uncertain jurors speak first)
     return [...jurors].sort((a, b) => {
       // UNDECIDED 우선
       if (a.currentPosition === 'UNDECIDED' && b.currentPosition !== 'UNDECIDED') return -1;
@@ -123,20 +123,20 @@ export class DiscussionManager {
   }
   
   private shouldInteract(speaker: JurorOpinion, listener: JurorOpinion): boolean {
-    // 상호작용 조건
-    // 1. 의견이 다른 경우
+    // Interaction conditions
+    // 1) Different positions
     if (speaker.currentPosition !== listener.currentPosition && 
         speaker.currentPosition !== 'UNDECIDED' && 
         listener.currentPosition !== 'UNDECIDED') {
       return true;
     }
     
-    // 2. 한 쪽이 UNDECIDED인 경우
+    // 2) One side is UNDECIDED
     if (speaker.currentPosition === 'UNDECIDED' || listener.currentPosition === 'UNDECIDED') {
       return true;
     }
     
-    // 3. 신뢰도 차이가 큰 경우 (같은 입장이어도)
+    // 3) Large confidence gap (even with same stance)
     if (Math.abs(speaker.confidenceLevel - listener.confidenceLevel) > 0.3) {
       return true;
     }
@@ -158,7 +158,7 @@ export class DiscussionManager {
   ): Promise<JuryDiscussion[]> {
     const persuasions: JuryDiscussion[] = [];
     
-    // 가장 확신이 강한 배심원이 가장 약한 배심원 설득 시도
+    // Most confident juror attempts to persuade the least confident juror
     const sortedByConfidence = [...jurors].sort((a, b) => b.confidenceLevel - a.confidenceLevel);
     const mostConfident = sortedByConfidence[0];
     const leastConfident = sortedByConfidence[sortedByConfidence.length - 1];
@@ -173,9 +173,9 @@ export class DiscussionManager {
           `persuasion_${mostConfident.jurorId}_${Date.now()}`,
           mostConfident.jurorId,
           mostConfident.jurorName,
-          `${leastConfident.jurorName}님, 제 입장을 재고해 주시기 바랍니다. 
-          ${mostConfident.keyArguments[0]}는 명백한 증거입니다. 
-          ${mostConfident.currentPosition} 주장이 ${(mostConfident.confidenceLevel * 100).toFixed(0)}% 확실합니다.`,
+          `${leastConfident.jurorName}, I ask you to reconsider my stance. 
+          ${mostConfident.keyArguments[0]} is clear evidence. 
+          The ${mostConfident.currentPosition} stance is ${(mostConfident.confidenceLevel * 100).toFixed(0)}% certain.`,
           'challenge',
           'assertive',
           0.8, // 높은 설득 의도
@@ -208,7 +208,7 @@ export class DiscussionManager {
       const undecidedInstance = jurorInstances.get(undecided.jurorId);
       if (!undecidedInstance) continue;
       
-      // 가장 확신이 강한 배심원에게 질문
+      // Ask the most confident juror
       const mostConfident = allJurors
         .filter(j => j.currentPosition !== 'UNDECIDED')
         .sort((a, b) => b.confidenceLevel - a.confidenceLevel)[0];
@@ -218,7 +218,7 @@ export class DiscussionManager {
           `question_${undecided.jurorId}_${Date.now()}`,
           undecided.jurorId,
           undecided.jurorName,
-          `${mostConfident.jurorName}님, ${mostConfident.currentPosition} 주장의 핵심 근거를 더 설명해 주시겠습니까?`,
+          `${mostConfident.jurorName}, could you elaborate on the key basis for the ${mostConfident.currentPosition} stance?`,
           'question',
           'questioning',
           0.3,
