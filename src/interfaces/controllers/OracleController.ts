@@ -331,11 +331,26 @@ export class OracleController {
 
       const { ClaudeJurySynthesisService } = await import('../../infrastructure/ai/ClaudeJurySynthesisService');
       const service = new ClaudeJurySynthesisService();
+
+      // Best-effort: fetch contract to provide human-readable party names
+      let partyAName: string | undefined;
+      let partyBName: string | undefined;
+      try {
+        const contracts = container.get<IContractRepository>('IContractRepository');
+        const contract = await contracts.findById(String(contractId));
+        if (contract) {
+          partyAName = contract.partyA?.name || undefined;
+          partyBName = contract.partyB?.name || undefined;
+        }
+      } catch {}
+
       const data = await service.generate({
         winnerId: decision.winnerId,
         contractId: String(contractId),
         messages,
-        locale: lang as any
+        locale: lang as any,
+        partyAName,
+        partyBName
       });
 
       res.status(200).json({ success: true, data });
