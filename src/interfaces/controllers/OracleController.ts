@@ -305,6 +305,16 @@ export class OracleController {
         return;
       }
 
+      // If winner-arguments are already stored with the decision, return them (minimal invasive read path)
+      try {
+        const { isWinnerJuryArguments } = await import('../../domain/valueObjects/WinnerJuryArguments');
+        const stored = (decision.metadata as any)?.dataPoints?.winnerArguments;
+        if (stored && isWinnerJuryArguments(stored)) {
+          res.status(200).json({ success: true, data: stored, cached: true });
+          return;
+        }
+      } catch {}
+
       // Try to use real deliberation messages first
       let messages = emitter.getMessageHistory(String(contractId));
       if (!messages || messages.length === 0) {
@@ -355,8 +365,12 @@ export class OracleController {
         partyBName,
         topic
       });
+      // Persist generated arguments to decision metadata (best-effort)
+      try {
+        await decisionRepo.saveWinnerArguments(String(contractId), data);
+      } catch {}
 
-      res.status(200).json({ success: true, data });
+      res.status(200).json({ success: true, data, cached: false });
     } catch (error) {
       logger.error('Failed to get winner arguments', {
         contractId: req.params.contractId,
