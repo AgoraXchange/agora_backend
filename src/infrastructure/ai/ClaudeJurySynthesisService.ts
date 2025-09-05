@@ -11,6 +11,7 @@ export interface JurySynthesisInput {
   // Optional: human-readable party names for winner label substitution
   partyAName?: string;
   partyBName?: string;
+  topic?: string;
 }
 
 export class ClaudeJurySynthesisService {
@@ -31,6 +32,7 @@ export class ClaudeJurySynthesisService {
     const { winnerId, messages, contractId } = input;
     const winnerLabel = this.toPartyLabel(winnerId);
     const winnerDisplay = this.toPartyDisplayName(winnerLabel, input.partyAName, input.partyBName);
+    const topicDisplay = (input.topic || '').trim() || (input.locale === 'ko' ? '해당 분쟁 주제' : 'the contract dispute');
 
     const supporting = messages
       .filter(m => m.messageType === 'proposal' && m.content?.winner === winnerId)
@@ -61,15 +63,24 @@ export class ClaudeJurySynthesisService {
 
     const langCode = input.locale || 'en';
     const language = langCode === 'ko' ? 'Korean' : 'English';
-    const header = `You are a careful logician. Build three distinct logical arguments that support the chosen winner using the provided evidence. Then derive a concise conclusion that follows inevitably from those arguments. Output strict JSON only.`;
+    const header = `You are a careful logician. Build three distinct logical arguments that support the chosen winner using the provided evidence. Then derive a concise conclusion that follows inevitably from those arguments. Output strict JSON only.
+
+Rules:
+- Never mention or output internal identifiers (for example: "12:1"), contract IDs, or addresses.
+- Always refer to the debate topic and positions using the human-readable names provided below (no numeric IDs).
+- Do not include any IDs in the output under any circumstance.`;
     const instructions = `
 Task:
+Entities:
+- Topic: ${topicDisplay}
+- Positions: Party A = ${input.partyAName?.trim() || 'Party A'}, Party B = ${input.partyBName?.trim() || 'Party B'}
 - Winner: ${winnerDisplay}
 - Use only the provided rationales/evidence as sources; avoid assumptions.
 - Each of Jury1/2/3 should be a single, self-contained argument supported by one or more evidence pieces.
 - Conclusion must logically follow from Jury1–Jury3 without introducing new facts.
 - Output language: ${language}
 - Output format: a single compact JSON object with keys "Jury1", "Jury2", "Jury3", "Conclusion". No markdown, no code fences, no commentary.
+ - Do not reference internal IDs anywhere; use natural language names only as listed in Entities.
 
 Available supporting items:
 ${capped.map((s, i) => `#${i + 1} Agent=${s.agent}\nRationale=${s.rationale}\nEvidence=${s.evidence.join(' | ')}`).join('\n\n')}

@@ -335,12 +335,14 @@ export class OracleController {
       // Best-effort: fetch contract to provide human-readable party names
       let partyAName: string | undefined;
       let partyBName: string | undefined;
+      let topic: string | undefined;
       try {
         const contracts = container.get<IContractRepository>('IContractRepository');
         const contract = await contracts.findById(String(contractId));
         if (contract) {
           partyAName = contract.partyA?.name || undefined;
           partyBName = contract.partyB?.name || undefined;
+          topic = contract.topic || undefined;
         }
       } catch {}
 
@@ -350,7 +352,8 @@ export class OracleController {
         messages,
         locale: lang as any,
         partyAName,
-        partyBName
+        partyBName,
+        topic
       });
 
       res.status(200).json({ success: true, data });
