@@ -8,6 +8,9 @@ export interface JurySynthesisInput {
   contractId: string;
   messages: DeliberationMessage[];
   locale?: 'ko' | 'en';
+  /** Optional context for prompt */
+  topic?: string;
+  description?: string;
 }
 
 export class ClaudeJurySynthesisService {
@@ -54,12 +57,26 @@ export class ClaudeJurySynthesisService {
       evidence: s.evidence.slice(0, 4).map(e => limit(e, 300))
     }));
 
+    // Build a natural-language winner claim from best supporting rationale
+    const bestRationale = supporting
+      .map(s => s.rationale)
+      .filter(Boolean)
+      .sort((a, b) => b.length - a.length)[0];
+    const winnerClaim = bestRationale ? limit(bestRationale, 280) : (input.locale === 'ko'
+      ? '승자 측의 주장을 요약하여 지지하십시오.'
+      : 'Support the winning side with a concise claim.');
+
     const langCode = input.locale || 'en';
     const language = langCode === 'ko' ? 'Korean' : 'English';
-    const header = `You are a careful logician. Build three distinct logical arguments that support the chosen winner using the provided evidence. Then derive a concise conclusion that follows inevitably from those arguments. Output strict JSON only.`;
+    const header = `You are a careful logician. Build three distinct logical arguments that support the winner's natural-language claim using the provided evidence and context. Then derive a concise conclusion that follows inevitably from those arguments. Output strict JSON only.`;
+    const ctxTopic = input.topic ? `Topic: ${limit(input.topic, 200)}` : '';
+    const ctxDesc = input.description ? `Description: ${limit(input.description, 500)}` : '';
+    const contextBlock = [ctxTopic, ctxDesc].filter(Boolean).join('\n');
+
     const instructions = `
 Task:
-- Winner: ${winnerId}
+- Context:\n${contextBlock || '(no additional context provided)'}
+- Winner claim to support: ${winnerClaim}
 - Use only the provided rationales/evidence as sources; avoid assumptions.
 - Each of Jury1/2/3 should be a single, self-contained argument supported by one or more evidence pieces.
 - Conclusion must logically follow from Jury1–Jury3 without introducing new facts.
@@ -89,17 +106,17 @@ ${capped.map((s, i) => `#${i + 1} Agent=${s.agent}\nRationale=${s.rationale}\nEv
         }
 
         logger.warn('Claude jury synthesis returned unrecognized JSON, using fallback parse', { contractId });
-        return this.fallbackFromEvidence(capped, winnerId, input.locale);
+        return this.fallbackFromEvidence(capped, winnerClaim, input.locale, input.topic, input.description);
       } catch (error) {
         logger.error('Claude jury synthesis failed, using local fallback', {
           contractId,
           error: error instanceof Error ? error.message : 'Unknown error'
         });
-        return this.fallbackFromEvidence(capped, winnerId, input.locale);
+        return this.fallbackFromEvidence(capped, winnerClaim, input.locale, input.topic, input.description);
       }
     }
 
-    return this.fallbackFromEvidence(capped, winnerId, input.locale);
+    return this.fallbackFromEvidence(capped, winnerClaim, input.locale, input.topic, input.description);
   }
 
   private safeParseJSON(raw: string): any {
@@ -120,8 +137,10 @@ ${capped.map((s, i) => `#${i + 1} Agent=${s.agent}\nRationale=${s.rationale}\nEv
 
   private fallbackFromEvidence(
     items: Array<{ agent: string; rationale: string; evidence: string[] }>,
-    winnerId: string,
-    locale: 'ko' | 'en' = 'en'
+    winnerClaim: string,
+    locale: 'ko' | 'en' = 'en',
+    topic?: string,
+    description?: string
   ): WinnerJuryArguments {
     const text = (s: string) => s.replace(/\s+/g, ' ').trim();
     const arg = (i: number) => {
@@ -132,10 +151,13 @@ ${capped.map((s, i) => `#${i + 1} Agent=${s.agent}\nRationale=${s.rationale}\nEv
         : `주장 ${i + 1}: ${text(it?.rationale || '지지 논거')} (근거: ${text(ev)})`;
     };
     const concl = () => {
+      const ctxVals = [topic, description].filter((v): v is string => !!v);
+      const ctx = ctxVals.map(text);
+      const ctxLine = ctx.length > 0 ? (locale === 'en' ? `Context: ${ctx.join(' | ')}` : `맥락: ${ctx.join(' | ')}`) : '';
       const base = locale === 'en'
-        ? `Given the above arguments and evidence, the winner '${winnerId}' is best supported.`
-        : `위의 주장과 근거에 비추어 볼 때, 승자 '${winnerId}'가 가장 타당합니다.`;
-      return base;
+        ? `Given the above arguments and evidence, the winner's claim is best supported: ${text(winnerClaim)}`
+        : `위의 주장과 근거에 비추어 볼 때, 승자의 주장이 가장 타당합니다: ${text(winnerClaim)}`;
+      return ctxLine ? `${ctxLine} ${base}` : base;
     };
     return {
       Jury1: arg(0),
@@ -145,4 +167,3 @@ ${capped.map((s, i) => `#${i + 1} Agent=${s.agent}\nRationale=${s.rationale}\nEv
     };
   }
 }
-

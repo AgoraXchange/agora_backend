@@ -298,6 +298,7 @@ export class OracleController {
       const lang = (req.query.lang as string) === 'ko' ? 'ko' : 'en';
       const decisionRepo = container.get<IOracleDecisionRepository>('IOracleDecisionRepository');
       const emitter = container.get<DeliberationEventEmitter>('DeliberationEventEmitter');
+      const contracts = container.get<IContractRepository>('IContractRepository');
 
       const decision = await decisionRepo.findByContractId(String(contractId));
       if (!decision) {
@@ -329,13 +330,17 @@ export class OracleController {
         messages = [synthetic];
       }
 
+      const contract = await contracts.findById(String(contractId));
+
       const { ClaudeJurySynthesisService } = await import('../../infrastructure/ai/ClaudeJurySynthesisService');
       const service = new ClaudeJurySynthesisService();
       const data = await service.generate({
         winnerId: decision.winnerId,
         contractId: String(contractId),
         messages,
-        locale: lang as any
+        locale: lang as any,
+        topic: contract?.topic,
+        description: contract?.description
       });
 
       res.status(200).json({ success: true, data });
