@@ -13,14 +13,33 @@ export interface JurySynthesisInput {
 export class ClaudeJurySynthesisService {
   private claude: Anthropic | null = null;
   private readonly model: string;
+  private readonly driver: 'local' | 'anthropic';
 
   constructor() {
     const apiKey = process.env.ANTHROPIC_API_KEY;
     this.model = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
-    if (apiKey) {
-      this.claude = new Anthropic({ apiKey });
+    
+    // Auto-enable anthropic driver if API key is available (unless explicitly set to local)
+    const driverEnv = process.env.JURY_SYNTHESIS_DRIVER;
+    if (driverEnv === 'local') {
+      this.driver = 'local';
+    } else if (driverEnv === 'anthropic' || apiKey) {
+      this.driver = 'anthropic';
     } else {
-      logger.warn('ANTHROPIC_API_KEY not set. Falling back to local synthesis for jury arguments.');
+      this.driver = 'local';
+    }
+    
+    if (apiKey && this.driver === 'anthropic') {
+      this.claude = new Anthropic({ apiKey });
+      logger.info('Claude jury synthesis enabled', { model: this.model });
+    } else {
+      this.claude = null;
+      if (this.driver === 'anthropic') {
+        logger.warn('ANTHROPIC_API_KEY not set. Falling back to local synthesis for jury arguments.');
+        this.driver = 'local'; // Force fallback if no API key
+      } else {
+        logger.info('Using local jury synthesis (no Claude API calls)', { driver: this.driver });
+      }
     }
   }
 
@@ -70,15 +89,21 @@ Available supporting items:
 ${capped.map((s, i) => `#${i + 1} Agent=${s.agent}\nRationale=${s.rationale}\nEvidence=${s.evidence.join(' | ')}`).join('\n\n')}
 `;
 
-    if (this.claude) {
+    if (this.claude && this.driver === 'anthropic') {
       try {
-        const resp = await this.claude.messages.create({
+        const timeoutMs = parseInt(process.env.AI_REQUEST_TIMEOUT_MS || '30000', 10);
+        const aiCall = this.claude.messages.create({
           model: this.model,
-          max_tokens: 6000,
+          max_tokens: 1200,
           temperature: 0.2,
           system: header,
           messages: [ { role: 'user', content: instructions } ]
         });
+
+        const resp = await Promise.race([
+          aiCall,
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('AI request timeout')), timeoutMs))
+        ]);
 
         const first = resp.content?.[0];
         const text = first && (first.type === 'text') ? first.text : '';
@@ -91,7 +116,7 @@ ${capped.map((s, i) => `#${i + 1} Agent=${s.agent}\nRationale=${s.rationale}\nEv
         logger.warn('Claude jury synthesis returned unrecognized JSON, using fallback parse', { contractId });
         return this.fallbackFromEvidence(capped, winnerId, input.locale);
       } catch (error) {
-        logger.error('Claude jury synthesis failed, using local fallback', {
+        logger.warn('Claude jury synthesis failed, using local fallback', {
           contractId,
           error: error instanceof Error ? error.message : 'Unknown error'
         });
@@ -99,6 +124,10 @@ ${capped.map((s, i) => `#${i + 1} Agent=${s.agent}\nRationale=${s.rationale}\nEv
       }
     }
 
+    if (this.driver !== 'anthropic') {
+      // Intentionally local-only mode; avoid noisy logs
+      return this.fallbackFromEvidence(capped, winnerId, input.locale);
+    }
     return this.fallbackFromEvidence(capped, winnerId, input.locale);
   }
 
@@ -124,25 +153,45 @@ ${capped.map((s, i) => `#${i + 1} Agent=${s.agent}\nRationale=${s.rationale}\nEv
     locale: 'ko' | 'en' = 'en'
   ): WinnerJuryArguments {
     const text = (s: string) => s.replace(/\s+/g, ' ').trim();
-    const arg = (i: number) => {
-      const it = items[i % items.length];
-      const ev = it?.evidence?.[0] || it?.rationale || '';
-      return locale === 'en'
-        ? `Argument ${i + 1}: ${text(it?.rationale || 'Supportive rationale')} (evidence: ${text(ev)})`
-        : `주장 ${i + 1}: ${text(it?.rationale || '지지 논거')} (근거: ${text(ev)})`;
+    
+    // Generate diverse arguments even with limited data
+    const generateArg = (index: number) => {
+      const itemIndex = Math.min(index, items.length - 1);
+      const item = items[itemIndex];
+      const rationale = text(item?.rationale || '');
+      const evidence = item?.evidence?.[0] ? text(item.evidence[0]) : rationale;
+      
+      // Create different argument angles
+      const angles = locale === 'en' ? [
+        `Strong evidence supports this decision`,
+        `Multiple factors indicate this outcome`, 
+        `Comprehensive analysis confirms this result`
+      ] : [
+        `강력한 근거가 이 결정을 뒷받침합니다`,
+        `다양한 요소가 이 결과를 나타냅니다`,
+        `종합적인 분석이 이 결과를 확인해줍니다`
+      ];
+      
+      const angle = angles[index] || angles[0];
+      const prefix = locale === 'en' ? `Argument ${index + 1}` : `주장 ${index + 1}`;
+      const evidenceLabel = locale === 'en' ? 'evidence' : '근거';
+      
+      if (rationale && rationale !== evidence) {
+        return `${prefix}: ${angle} - ${rationale} (${evidenceLabel}: ${evidence})`;
+      } else {
+        return `${prefix}: ${angle} (${evidenceLabel}: ${rationale || 'Supporting analysis indicates this outcome'})`;
+      }
     };
-    const concl = () => {
-      const base = locale === 'en'
-        ? `Given the above arguments and evidence, the winner '${winnerId}' is best supported.`
-        : `위의 주장과 근거에 비추어 볼 때, 승자 '${winnerId}'가 가장 타당합니다.`;
-      return base;
-    };
+    
+    const conclusion = locale === 'en'
+      ? `Based on the comprehensive analysis above, '${winnerId}' emerges as the most supported winner.`
+      : `위의 종합적인 분석을 바탕으로, '${winnerId}'가 가장 지지받는 승자로 나타납니다.`;
+    
     return {
-      Jury1: arg(0),
-      Jury2: arg(1),
-      Jury3: arg(2),
-      Conclusion: concl()
+      Jury1: generateArg(0),
+      Jury2: generateArg(1), 
+      Jury3: generateArg(2),
+      Conclusion: conclusion
     };
   }
 }
-
