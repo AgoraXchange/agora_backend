@@ -41,7 +41,7 @@ export class GeminiJuror extends BaseJuror {
   }
 
   protected evaluateArgument(analysis: ArgumentAnalysis): EvaluationCriteria {
-    // Gemini는 다각도 종합 평가
+    // Gemini performs multi-angle comprehensive evaluation
     const logicalStrength = analysis.calculateLogicalStrength();
     
     // 균형잡힌 평가 - 극단값 회피
@@ -110,7 +110,6 @@ export class GeminiJuror extends BaseJuror {
       logger.error('Gemini reasoning generation failed', {
         error: error instanceof Error ? error.message : 'Unknown error'
       });
-      return 'Balanced judgment through multi-perspective analysis';
     }
   }
 

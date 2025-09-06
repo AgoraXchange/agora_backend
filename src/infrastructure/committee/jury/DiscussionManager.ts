@@ -29,23 +29,24 @@ export class DiscussionManager {
         const speakerInstance = jurorInstances.get(speaker.jurorId);
         if (!speakerInstance) continue;
         
-        // 2.1 주요 입장 발표
+        // 2.1 Main position statement
         const statement = this.createPositionStatement(speaker, round);
         discussions.push(statement);
         
-        // 2.2 다른 배심원들과 상호작용
+        // 2.2 Interact with other jurors
         for (const listener of jurors) {
           if (listener.jurorId === speaker.jurorId) continue;
           
           const listenerInstance = jurorInstances.get(listener.jurorId);
           if (!listenerInstance) continue;
           
+
           // Interact when there is a difference of opinion
           if (this.shouldInteract(speaker, listener)) {
             const interaction = await speakerInstance.respondToOpinion(listener, speaker);
             discussions.push(interaction);
             
-            // 리스너의 반응
+            // Listener's response
             if (interaction.argumentType === 'question') {
               const answer = await listenerInstance.answerQuestion(interaction, listener);
               discussions.push(answer);
@@ -131,6 +132,7 @@ export class DiscussionManager {
       return true;
     }
     
+
     // 2) One side is UNDECIDED
     if (speaker.currentPosition === 'UNDECIDED' || listener.currentPosition === 'UNDECIDED') {
       return true;
@@ -185,7 +187,7 @@ export class DiscussionManager {
         
         persuasions.push(persuasion);
         
-        // 대상의 반응
+        // Response from the target
         const targetInstance = jurorInstances.get(leastConfident.jurorId);
         if (targetInstance) {
           const response = await targetInstance.considerPersuasion(persuasion, leastConfident);

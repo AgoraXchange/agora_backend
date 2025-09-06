@@ -41,18 +41,18 @@ export class ClaudeJuror extends BaseJuror {
   }
 
   protected evaluateArgument(analysis: ArgumentAnalysis): EvaluationCriteria {
-    // Claude는 맥락과 뉘앙스를 중시
+    // Claude prioritizes context and nuance
     const logicalStrength = analysis.calculateLogicalStrength();
     
-    // 맥락적 완성도 평가
+    // Evaluate contextual completeness
     const hasContext = analysis.keyInsights.length > 0;
     const contextBonus = hasContext ? 0.15 : 0;
     
-    // 암묵적 가정 고려
+    // Consider implicit assumptions
     const assumptionPenalty = analysis.logicalStructure.assumptions && 
                              analysis.logicalStructure.assumptions.length > 3 ? 0.1 : 0;
     
-    // 실용적 관점 보너스
+    // Practicality bonus
     const practicalityBonus = analysis.evidenceExtracted.some(e => 
       e.includes('실제') || e.includes('현실') || e.includes('실용')
     ) ? 0.1 : 0;

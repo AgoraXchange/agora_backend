@@ -92,7 +92,7 @@ export class MongoContractRepository implements IContractRepository {
 
       logger.info('MongoDB indexes created for contracts collection');
     } catch (error) {
-      logger.error('Failed to create indexes', { error: error instanceof Error ? error.message : 'Unknown error' });
+      logger.error('Failed to ensure indexes', { error: error instanceof Error ? error.message : 'Unknown error' });
     }
   }
 

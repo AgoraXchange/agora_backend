@@ -41,7 +41,7 @@ export class GPT5Juror extends BaseJuror {
   }
 
   protected evaluateArgument(analysis: ArgumentAnalysis): EvaluationCriteria {
-    // GPT-5는 논리적 오류에 매우 엄격
+    // GPT-5 is highly strict about logical fallacies
     const logicalStrength = analysis.calculateLogicalStrength();
     
     // 논리적 오류 패널티 적용
@@ -97,6 +97,7 @@ export class GPT5Juror extends BaseJuror {
       } as any);
       
       return response.choices[0]?.message?.content || 'Judgment based on logical analysis';
+      
     } catch (error) {
       logger.error('GPT-5 reasoning generation failed', {
         error: error instanceof Error ? error.message : 'Unknown error'

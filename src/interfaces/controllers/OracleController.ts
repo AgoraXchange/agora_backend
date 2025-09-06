@@ -9,6 +9,7 @@ import { Party } from '../../domain/entities/Party';
 import { IOracleDecisionRepository } from '../../domain/repositories/IOracleDecisionRepository';
 import { DecisionCoordinator } from '../../infrastructure/coordination/DecisionCoordinator';
 import { DeliberationEventEmitter } from '../../infrastructure/committee/events/DeliberationEventEmitter';
+import { IWinnerArgumentsCache } from '../../domain/repositories/IWinnerArgumentsCache';
 import { logger } from '../../infrastructure/logging/Logger';
 
 @injectable()
