@@ -6,8 +6,8 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 @injectable()
 export class GeminiProposer extends BaseProposer {
   readonly agentId = 'gemini';
-  readonly agentName = 'Gemini Pro Analyst';
-  readonly agentType = 'gemini';
+  readonly agentName = 'Pro Analyst';
+  readonly agentType = 'pro_analyst';
 
   protected getDefaultConfig(): ProposerConfig {
     return {
@@ -29,8 +29,7 @@ Determine winner. Return JSON.`
   }
 
   protected getModelName(): string {
-    // Prefer GOOGLE_MODEL for consistency with env; fallback to GEMINI_MODEL
-    return process.env.GEMINI_MODEL || process.env.GOOGLE_MODEL || 'gemini-pro';
+    return process.env.GEMINI_MODEL || 'gemini-2.5-pro';
   }
 
   protected async callAIModel(prompt: string, temperature: number): Promise<{
@@ -43,8 +42,7 @@ Determine winner. Return JSON.`
     rawResponse: any;
   }> {
     // Check if we should use mock mode
-    // Support both GOOGLE_API_KEY (preferred) and GOOGLE_AI_API_KEY
-    const apiKey = process.env.GOOGLE_API_KEY || process.env.GOOGLE_AI_API_KEY;
+    const apiKey = process.env.GOOGLE_API_KEY;
     
     if (!apiKey || apiKey === 'mock' || apiKey.includes('mock_google')) {
       logger.debug('Using mock Gemini response (mock mode enabled)');
@@ -59,7 +57,7 @@ Determine winner. Return JSON.`
       });
 
       // Implement real Gemini API call
-      const genAI = new GoogleGenerativeAI(apiKey!);
+      const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY!);
       const model = genAI.getGenerativeModel({ model: this.getModelName() });
       
       // Combine system prompt and user prompt

@@ -7,14 +7,14 @@ import Anthropic from '@anthropic-ai/sdk';
 export class ClaudeProposer extends BaseProposer {
   readonly agentId = 'claude';
   readonly agentName = 'Critic';
-  readonly agentType = 'claude';
+  readonly agentType = 'critic';
 
   protected getDefaultConfig(): ProposerConfig {
     return {
       temperature: 0.6, // Claude typically uses lower temperature
       maxTokens: 2000,
       topP: 0.85,
-      systemPrompt: `Critic analyzing debate disputes with logical focus.
+      systemPrompt: `Critic analyzing debate with logical focus.
 
 Return JSON:
 {
@@ -22,8 +22,8 @@ Return JSON:
   "confidence": 0.0-1.0,
   "rationale": "logical reasoning (max 100 words)",
   "evidence": ["point 1", "point 2"],
-  "methodology": "debate analysis",
-  "ethical_considerations": "brief logic note",
+  "methodology": "rational analysis",
+  "logical_considerations": "brief logic note",
   "uncertainty_factors": ["uncertainty 1"]
 }`,
       userPromptTemplate: `Contract {CONTRACT_ID}
@@ -41,8 +41,7 @@ Analyze logically. Return JSON.`
   }
 
   protected getModelName(): string {
-    // Prefer ANTHROPIC_MODEL for consistency with env; fallback to CLAUDE_MODEL
-    return process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || 'claude-3-sonnet';
+    return process.env.CLAUDE_MODEL || 'claude-sonnet-4-20250514';
   }
 
   protected async callAIModel(prompt: string, temperature: number): Promise<{
@@ -55,11 +54,10 @@ Analyze logically. Return JSON.`
     rawResponse: any;
   }> {
     // Check if we should use mock mode
-    // Support both CLAUDE_API_KEY and ANTHROPIC_API_KEY (preferred)
-    const apiKey = process.env.CLAUDE_API_KEY || process.env.ANTHROPIC_API_KEY;
+    const apiKey = process.env.ANTHROPIC_API_KEY;
     
     if (!apiKey || apiKey === 'mock' || apiKey.includes('mock_claude')) {
-      logger.debug('Using mock Claude response (mock mode enabled)');
+      logger.debug('Using mock critic response (mock mode enabled)');
       return this.getMockClaudeResponse(prompt);
     }
     
@@ -71,7 +69,7 @@ Analyze logically. Return JSON.`
       });
 
       // Implement real Claude API call
-      const anthropic = new Anthropic({ apiKey });
+      const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
       
       const message = await anthropic.messages.create({
         model: this.getModelName(),
@@ -157,7 +155,7 @@ Analyze logically. Return JSON.`
         'Consistency with legal precedents'
       ],
       methodology: 'constitutional analysis with emphasis on fairness',
-      ethical_considerations: 'Ensured impartial evaluation respecting both parties\' rights and maintaining procedural fairness',
+      logical_considerations: 'Ensured impartial evaluation respecting both parties\' rights and maintaining procedural fairness',
       uncertainty_factors: [
         'Limited contextual information',
         'Potential for additional evidence',

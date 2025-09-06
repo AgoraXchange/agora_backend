@@ -47,42 +47,44 @@ export class MongoContractRepository implements IContractRepository {
 
   private async createIndexes(): Promise<void> {
     try {
-      // Ensure contractAddress is NOT unique because many logical contracts share the same main contract address
-      try {
-        const indexes = await this.collection.indexes();
-        const addrIdx = indexes.find((i: any) => i.name === 'contractAddress_1');
-        if (addrIdx?.unique) {
-          try {
-            await this.collection.dropIndex('contractAddress_1');
-            logger.warn('Dropped unique index contractAddress_1 to allow multiple contracts per address');
-          } catch (dropErr) {
-            logger.warn('Failed to drop unique index contractAddress_1 (may not exist)', { error: dropErr instanceof Error ? dropErr.message : String(dropErr) });
-          }
+      // Ensure unique index on contractAddress, handling existing non-unique index gracefully
+      const keySpec = { contractAddress: 1 } as const;
+      const uniqueIndexName = 'contractAddress_1';
+
+      const indexes = await this.collection.listIndexes().toArray();
+      const existing = indexes.find(i => JSON.stringify(i.key) === JSON.stringify(keySpec));
+
+      if (!existing) {
+        await this.collection.createIndex(keySpec, { unique: true, name: uniqueIndexName });
+      } else if (!existing.unique) {
+        // Check for duplicates before attempting to convert to a unique index
+        const duplicates = await this.collection
+          .aggregate([
+            { $group: { _id: '$contractAddress', count: { $sum: 1 } } },
+            { $match: { count: { $gt: 1 } } },
+            { $limit: 1 },
+          ])
+          .toArray();
+
+        if (duplicates.length > 0) {
+          logger.warn('Duplicate contractAddress detected; skipping unique index creation', {
+            indexName: existing.name,
+          });
+        } else {
+          // No duplicates; drop old non-unique index and create the unique one
+          const nameToDrop = existing.name ?? uniqueIndexName;
+          await this.collection.dropIndex(nameToDrop);
+          await this.collection.createIndex(keySpec, { unique: true, name: uniqueIndexName });
         }
-      } catch (inspectErr) {
-        logger.debug('Could not inspect indexes for contracts collection', { error: inspectErr instanceof Error ? inspectErr.message : 'unknown' });
       }
-      // Create a non-unique index for query performance
-      try {
-        await this.collection.createIndex({ contractAddress: 1 }, { unique: false, name: 'contractAddress_1' });
-      } catch (createErr) {
-        logger.debug('contractAddress index creation skipped/failed (likely already exists)', { error: createErr instanceof Error ? createErr.message : 'unknown' });
-      }
-      // Add compound unique index: (contractAddress, _id)
-      try {
-        await this.collection.createIndex(
-          { contractAddress: 1, _id: 1 },
-          { unique: true, name: 'contractAddress_1__id_1_unique' }
-        );
-        logger.info('Ensured compound unique index on (contractAddress, _id)');
-      } catch (cmpErr) {
-        logger.debug('Compound unique index creation skipped/failed (likely already exists)', { error: cmpErr instanceof Error ? cmpErr.message : 'unknown' });
-      }
-      await this.collection.createIndex({ status: 1, bettingEndTime: 1 });
-      await this.collection.createIndex({ winnerId: 1 });
-      logger.info('MongoDB indexes created for contracts collection');
+
+      // Ensure other helpful indexes (idempotent, with explicit names to avoid conflicts)
+      await this.collection.createIndex({ status: 1, bettingEndTime: 1 }, { name: 'status_1_bettingEndTime_1' });
+      await this.collection.createIndex({ winnerId: 1 }, { name: 'winnerId_1' });
+
+      logger.info('MongoDB indexes ensured for contracts collection');
     } catch (error) {
-      logger.error('Failed to create indexes', { error: error instanceof Error ? error.message : 'Unknown error' });
+      logger.error('Failed to ensure indexes', { error: error instanceof Error ? error.message : 'Unknown error' });
     }
   }
 
