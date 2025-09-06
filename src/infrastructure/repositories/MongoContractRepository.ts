@@ -47,12 +47,44 @@ export class MongoContractRepository implements IContractRepository {
 
   private async createIndexes(): Promise<void> {
     try {
-      await this.collection.createIndex({ contractAddress: 1 }, { unique: true });
-      await this.collection.createIndex({ status: 1, bettingEndTime: 1 });
-      await this.collection.createIndex({ winnerId: 1 });
-      logger.info('MongoDB indexes created for contracts collection');
+      // Ensure unique index on contractAddress, handling existing non-unique index gracefully
+      const keySpec = { contractAddress: 1 } as const;
+      const uniqueIndexName = 'contractAddress_1';
+
+      const indexes = await this.collection.listIndexes().toArray();
+      const existing = indexes.find(i => JSON.stringify(i.key) === JSON.stringify(keySpec));
+
+      if (!existing) {
+        await this.collection.createIndex(keySpec, { unique: true, name: uniqueIndexName });
+      } else if (!existing.unique) {
+        // Check for duplicates before attempting to convert to a unique index
+        const duplicates = await this.collection
+          .aggregate([
+            { $group: { _id: '$contractAddress', count: { $sum: 1 } } },
+            { $match: { count: { $gt: 1 } } },
+            { $limit: 1 },
+          ])
+          .toArray();
+
+        if (duplicates.length > 0) {
+          logger.warn('Duplicate contractAddress detected; skipping unique index creation', {
+            indexName: existing.name,
+          });
+        } else {
+          // No duplicates; drop old non-unique index and create the unique one
+          const nameToDrop = existing.name ?? uniqueIndexName;
+          await this.collection.dropIndex(nameToDrop);
+          await this.collection.createIndex(keySpec, { unique: true, name: uniqueIndexName });
+        }
+      }
+
+      // Ensure other helpful indexes (idempotent, with explicit names to avoid conflicts)
+      await this.collection.createIndex({ status: 1, bettingEndTime: 1 }, { name: 'status_1_bettingEndTime_1' });
+      await this.collection.createIndex({ winnerId: 1 }, { name: 'winnerId_1' });
+
+      logger.info('MongoDB indexes ensured for contracts collection');
     } catch (error) {
-      logger.error('Failed to create indexes', { error: error instanceof Error ? error.message : 'Unknown error' });
+      logger.error('Failed to ensure indexes', { error: error instanceof Error ? error.message : 'Unknown error' });
     }
   }
 
