@@ -17,7 +17,7 @@ export class OpenAIService implements IAIService {
     }
 
     this.openai = new OpenAI({ apiKey });
-    this.model = process.env.OPENAI_MODEL || 'gpt-4o';
+    this.model = process.env.OPENAI_MODEL || 'gpt-5';
   }
 
   async analyzeAndDecideWinner(input: AIAnalysisInput): Promise<AIAnalysisResult> {

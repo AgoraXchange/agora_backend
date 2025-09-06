@@ -70,7 +70,7 @@ export class InvestigationReport {
     조사 보고서 요약
     ================
     계약 ID: ${this.contractId}
-    조사관: Claude
+    조사관: Investigator
     
     분석 완료도: ${(this.analysisCompleteness * 100).toFixed(1)}%
     댓글 분석: ${this.metadata.analyzedComments}/${this.metadata.totalComments}건

@@ -296,7 +296,7 @@ JSON output:
 
   private getDefaultConfig(): JudgeConfig {
     return {
-      model: process.env.JUDGE_LLM_MODEL || 'gpt-4-turbo-preview',
+      model: process.env.JUDGE_LLM_MODEL || 'gpt-5',
       temperature: parseFloat(process.env.JUDGE_LLM_TEMPERATURE || '0.3'),
       maxTokens: parseInt(process.env.JUDGE_LLM_MAX_TOKENS || '1500'),
       biasReductionTechniques: {
