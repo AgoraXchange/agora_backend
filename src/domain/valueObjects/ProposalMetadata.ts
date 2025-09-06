@@ -63,14 +63,12 @@ export class ProposalMetadata implements IProposalMetadata {
   private getPromptCostPer1K(): number {
     // Approximate costs per 1K tokens (USD)
     switch (this.model.toLowerCase()) {
-      case 'gpt-4':
-      case 'gpt-4-turbo':
+      case 'gpt-5':
+      case 'gpt-5-2025-08-07':
         return 0.01;
-      case 'claude-3-opus':
-        return 0.015;
-      case 'claude-3-sonnet':
+      case 'claude-sonnet-4-20250514':
         return 0.003;
-      case 'gemini-pro':
+      case 'gemini-2.5-pro':
         return 0.0005;
       default:
         return 0.002; // Default estimate
@@ -80,14 +78,12 @@ export class ProposalMetadata implements IProposalMetadata {
   private getCompletionCostPer1K(): number {
     // Approximate costs per 1K tokens (USD)
     switch (this.model.toLowerCase()) {
-      case 'gpt-4':
-      case 'gpt-4-turbo':
+      case 'gpt-5':
+      case 'gpt-5-2025-08-07':
         return 0.03;
-      case 'claude-3-opus':
-        return 0.075;
-      case 'claude-3-sonnet':
+      case 'claude-sonnet-4-20250514':
         return 0.015;
-      case 'gemini-pro':
+      case 'gemini-2.5-pro':
         return 0.0015;
       default:
         return 0.006; // Default estimate

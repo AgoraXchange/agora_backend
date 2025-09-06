@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { injectable, inject } from 'inversify';
 import { IOracleDecisionRepository } from '../../domain/repositories/IOracleDecisionRepository';
+import { IContractRepository } from '../../domain/repositories/IContractRepository';
 import { ICommitteeService } from '../../domain/services/ICommitteeService';
 import { DeliberationEventEmitter } from '../../infrastructure/committee/events/DeliberationEventEmitter';
 import { DeliberationVisualization } from '../../domain/valueObjects/DeliberationVisualization';
@@ -12,6 +13,7 @@ import { logger } from '../../infrastructure/logging/Logger';
 export class DeliberationVisualizationController {
   constructor(
     @inject('IOracleDecisionRepository') private decisionRepository: IOracleDecisionRepository,
+    @inject('IContractRepository') private contractRepository: IContractRepository,
     @inject('ICommitteeService') private committeeService: ICommitteeService,
     @inject('DeliberationEventEmitter') private eventEmitter: DeliberationEventEmitter
   ) {}
@@ -42,13 +44,17 @@ export class DeliberationVisualizationController {
         throw AppError.validationError('No deliberation messages available in memory for this decision');
       }
 
+      const contract = await this.contractRepository.findById(decision.contractId);
+
       const { ClaudeJurySynthesisService } = await import('../../infrastructure/ai/ClaudeJurySynthesisService');
       const service = new ClaudeJurySynthesisService();
       const result = await service.generate({
         winnerId: decision.winnerId,
         contractId: decision.contractId,
         messages,
-        locale: lang as any
+        locale: lang as any,
+        topic: contract?.topic,
+        description: contract?.description
       });
 
       res.json({ success: true, data: result });

@@ -299,6 +299,7 @@ export class OracleController {
       const lang = (req.query.lang as string) === 'ko' ? 'ko' : 'en';
       const decisionRepo = container.get<IOracleDecisionRepository>('IOracleDecisionRepository');
       const emitter = container.get<DeliberationEventEmitter>('DeliberationEventEmitter');
+      const contracts = container.get<IContractRepository>('IContractRepository');
 
       const decision = await decisionRepo.findByContractId(String(contractId));
       if (!decision) {
@@ -340,6 +341,8 @@ export class OracleController {
         messages = [synthetic];
       }
 
+      const contract = await contracts.findById(String(contractId));
+
       const { ClaudeJurySynthesisService } = await import('../../infrastructure/ai/ClaudeJurySynthesisService');
       const service = new ClaudeJurySynthesisService();
 
@@ -362,9 +365,8 @@ export class OracleController {
         contractId: String(contractId),
         messages,
         locale: lang as any,
-        partyAName,
-        partyBName,
-        topic
+        topic: contract?.topic,
+        description: contract?.description
       });
       // Persist generated arguments to decision metadata (best-effort)
       try {

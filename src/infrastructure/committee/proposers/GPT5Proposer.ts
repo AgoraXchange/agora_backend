@@ -25,7 +25,7 @@ export class GPT5Proposer extends BaseProposer {
       topP: 0.9,
       frequencyPenalty: 0.0,
       presencePenalty: 0.0,
-      systemPrompt: `Expert analyst evaluating debate disputes. Analyze parties objectively and decide winner.
+      systemPrompt: `Expert analyst evaluating debate. Analyze parties objectively and decide winner.
 
 Return JSON:
 {
