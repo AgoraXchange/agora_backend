@@ -29,6 +29,9 @@ import { MessageCollector } from './infrastructure/committee/MessageCollector';
 import { DeliberationEventEmitter } from './infrastructure/committee/events/DeliberationEventEmitter';
 import { DeliberationVisualizationController } from './interfaces/controllers/DeliberationVisualizationController';
 import { DecisionCoordinator } from './infrastructure/coordination/DecisionCoordinator';
+import { IWinnerArgumentsCache } from './domain/repositories/IWinnerArgumentsCache';
+import { InMemoryWinnerArgumentsCache } from './infrastructure/repositories/InMemoryWinnerArgumentsCache';
+import { MongoWinnerArgumentsCache } from './infrastructure/repositories/MongoWinnerArgumentsCache';
 
 const container = new Container();
 
@@ -40,9 +43,11 @@ const useMongoDB = process.env.USE_MONGODB === 'true';
 if (useMongoDB) {
   container.bind<IContractRepository>('IContractRepository').to(MongoContractRepository).inSingletonScope();
   container.bind<IOracleDecisionRepository>('IOracleDecisionRepository').to(MongoOracleDecisionRepository).inSingletonScope();
+  container.bind<IWinnerArgumentsCache>('IWinnerArgumentsCache').to(MongoWinnerArgumentsCache).inSingletonScope();
 } else {
   container.bind<IContractRepository>('IContractRepository').to(InMemoryContractRepository).inSingletonScope();
   container.bind<IOracleDecisionRepository>('IOracleDecisionRepository').to(InMemoryOracleDecisionRepository).inSingletonScope();
+  container.bind<IWinnerArgumentsCache>('IWinnerArgumentsCache').to(InMemoryWinnerArgumentsCache).inSingletonScope();
 }
 
 // Services

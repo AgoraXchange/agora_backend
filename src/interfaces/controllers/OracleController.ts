@@ -9,6 +9,7 @@ import { Party } from '../../domain/entities/Party';
 import { IOracleDecisionRepository } from '../../domain/repositories/IOracleDecisionRepository';
 import { DecisionCoordinator } from '../../infrastructure/coordination/DecisionCoordinator';
 import { DeliberationEventEmitter } from '../../infrastructure/committee/events/DeliberationEventEmitter';
+import { IWinnerArgumentsCache } from '../../domain/repositories/IWinnerArgumentsCache';
 import { logger } from '../../infrastructure/logging/Logger';
 
 @injectable()
@@ -305,6 +306,26 @@ export class OracleController {
         return;
       }
 
+      // Disable browser caching for dynamic AI-generated content
+      res.set({
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      });
+
+      // Serve from cache if available (but allow cache bypass for debugging)
+      const bypassCache = req.query.nocache === 'true';
+      if (!bypassCache) {
+        try {
+          const cache = container.get<IWinnerArgumentsCache>('IWinnerArgumentsCache');
+          const cached = await cache.getByContractId(String(contractId));
+          if (cached) {
+            res.status(200).json({ success: true, data: cached, cached: true });
+            return;
+          }
+        } catch {}
+      }
+
       // Try to use real deliberation messages first
       let messages = emitter.getMessageHistory(String(contractId));
       if (!messages || messages.length === 0) {
@@ -338,7 +359,13 @@ export class OracleController {
         locale: lang as any
       });
 
-      res.status(200).json({ success: true, data });
+      // Save to cache (best-effort)
+      try {
+        const cache = container.get<IWinnerArgumentsCache>('IWinnerArgumentsCache');
+        await cache.save(String(contractId), data);
+      } catch {}
+
+      res.status(200).json({ success: true, data, cached: false });
     } catch (error) {
       logger.error('Failed to get winner arguments', {
         contractId: req.params.contractId,

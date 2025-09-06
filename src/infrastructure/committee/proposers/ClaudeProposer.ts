@@ -103,8 +103,8 @@ Analyze logically. Return JSON.`
           confidence: 0.75,
           rationale: textContent,
           evidence: ['Based on Claude analysis'],
-          methodology: 'constitutional analysis with emphasis on fairness',
-          logical_considerations: 'Analysis completed with Claude',
+          methodology: 'debate analysis with emphasis on logic',
+          ethical_considerations: 'Analysis completed with Critic',
           uncertainty_factors: ['Response parsing uncertainty']
         };
       }
