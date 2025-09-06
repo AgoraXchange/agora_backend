@@ -306,25 +306,15 @@ export class OracleController {
         return;
       }
 
-      // Disable browser caching for dynamic AI-generated content
-      res.set({
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-        'Pragma': 'no-cache',
-        'Expires': '0'
-      });
-
-      // Serve from cache if available (but allow cache bypass for debugging)
-      const bypassCache = req.query.nocache === 'true';
-      if (!bypassCache) {
-        try {
-          const cache = container.get<IWinnerArgumentsCache>('IWinnerArgumentsCache');
-          const cached = await cache.getByContractId(String(contractId));
-          if (cached) {
-            res.status(200).json({ success: true, data: cached, cached: true });
-            return;
-          }
-        } catch {}
-      }
+      // If winner-arguments are already stored with the decision, return them (minimal invasive read path)
+      try {
+        const { isWinnerJuryArguments } = await import('../../domain/valueObjects/WinnerJuryArguments');
+        const stored = (decision.metadata as any)?.dataPoints?.winnerArguments;
+        if (stored && isWinnerJuryArguments(stored)) {
+          res.status(200).json({ success: true, data: stored, cached: true });
+          return;
+        }
+      } catch {}
 
       // Try to use real deliberation messages first
       let messages = emitter.getMessageHistory(String(contractId));
@@ -352,17 +342,33 @@ export class OracleController {
 
       const { ClaudeJurySynthesisService } = await import('../../infrastructure/ai/ClaudeJurySynthesisService');
       const service = new ClaudeJurySynthesisService();
+
+      // Best-effort: fetch contract to provide human-readable party names
+      let partyAName: string | undefined;
+      let partyBName: string | undefined;
+      let topic: string | undefined;
+      try {
+        const contracts = container.get<IContractRepository>('IContractRepository');
+        const contract = await contracts.findById(String(contractId));
+        if (contract) {
+          partyAName = contract.partyA?.name || undefined;
+          partyBName = contract.partyB?.name || undefined;
+          topic = contract.topic || undefined;
+        }
+      } catch {}
+
       const data = await service.generate({
         winnerId: decision.winnerId,
         contractId: String(contractId),
         messages,
-        locale: lang as any
+        locale: lang as any,
+        partyAName,
+        partyBName,
+        topic
       });
-
-      // Save to cache (best-effort)
+      // Persist generated arguments to decision metadata (best-effort)
       try {
-        const cache = container.get<IWinnerArgumentsCache>('IWinnerArgumentsCache');
-        await cache.save(String(contractId), data);
+        await decisionRepo.saveWinnerArguments(String(contractId), data);
       } catch {}
 
       res.status(200).json({ success: true, data, cached: false });

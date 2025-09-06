@@ -8,6 +8,10 @@ export interface JurySynthesisInput {
   contractId: string;
   messages: DeliberationMessage[];
   locale?: 'ko' | 'en';
+  // Optional: human-readable party names for winner label substitution
+  partyAName?: string;
+  partyBName?: string;
+  topic?: string;
 }
 
 export class ClaudeJurySynthesisService {
@@ -45,6 +49,9 @@ export class ClaudeJurySynthesisService {
 
   async generate(input: JurySynthesisInput): Promise<WinnerJuryArguments> {
     const { winnerId, messages, contractId } = input;
+    const winnerLabel = this.toPartyLabel(winnerId);
+    const winnerDisplay = this.toPartyDisplayName(winnerLabel, input.partyAName, input.partyBName);
+    const topicDisplay = (input.topic || '').trim() || (input.locale === 'ko' ? '해당 분쟁 주제' : 'the contract dispute');
 
     const supporting = messages
       .filter(m => m.messageType === 'proposal' && m.content?.winner === winnerId)
@@ -75,15 +82,24 @@ export class ClaudeJurySynthesisService {
 
     const langCode = input.locale || 'en';
     const language = langCode === 'ko' ? 'Korean' : 'English';
-    const header = `You are a careful logician. Build three distinct logical arguments that support the chosen winner using the provided evidence. Then derive a concise conclusion that follows inevitably from those arguments. Output strict JSON only.`;
+    const header = `You are a careful logician. Build three distinct logical arguments that support the chosen winner using the provided evidence. Then derive a concise conclusion that follows inevitably from those arguments. Output strict JSON only.
+
+Rules:
+- Never mention or output internal identifiers (for example: "12:1"), contract IDs, or addresses.
+- Always refer to the debate topic and positions using the human-readable names provided below (no numeric IDs).
+- Do not include any IDs in the output under any circumstance.`;
     const instructions = `
 Task:
-- Winner: ${winnerId}
+Entities:
+- Topic: ${topicDisplay}
+- Positions: Party A = ${input.partyAName?.trim() || 'Party A'}, Party B = ${input.partyBName?.trim() || 'Party B'}
+- Winner: ${winnerDisplay}
 - Use only the provided rationales/evidence as sources; avoid assumptions.
 - Each of Jury1/2/3 should be a single, self-contained argument supported by one or more evidence pieces.
 - Conclusion must logically follow from Jury1–Jury3 without introducing new facts.
 - Output language: ${language}
 - Output format: a single compact JSON object with keys "Jury1", "Jury2", "Jury3", "Conclusion". No markdown, no code fences, no commentary.
+ - Do not reference internal IDs anywhere; use natural language names only as listed in Entities.
 
 Available supporting items:
 ${capped.map((s, i) => `#${i + 1} Agent=${s.agent}\nRationale=${s.rationale}\nEvidence=${s.evidence.join(' | ')}`).join('\n\n')}
@@ -114,21 +130,43 @@ ${capped.map((s, i) => `#${i + 1} Agent=${s.agent}\nRationale=${s.rationale}\nEv
         }
 
         logger.warn('Claude jury synthesis returned unrecognized JSON, using fallback parse', { contractId });
-        return this.fallbackFromEvidence(capped, winnerId, input.locale);
+        return this.fallbackFromEvidence(capped, winnerDisplay, input.locale);
       } catch (error) {
         logger.warn('Claude jury synthesis failed, using local fallback', {
           contractId,
           error: error instanceof Error ? error.message : 'Unknown error'
         });
-        return this.fallbackFromEvidence(capped, winnerId, input.locale);
+        return this.fallbackFromEvidence(capped, winnerDisplay, input.locale);
       }
     }
 
-    if (this.driver !== 'anthropic') {
-      // Intentionally local-only mode; avoid noisy logs
-      return this.fallbackFromEvidence(capped, winnerId, input.locale);
+    return this.fallbackFromEvidence(capped, winnerDisplay, input.locale);
+  }
+
+  // Map internal winnerId (e.g., "11:1" or "11:2") to a symbolic party label expected by the prompt
+  private toPartyLabel(winnerId: string): 'partyA' | 'partyB' {
+    if (!winnerId) return 'partyA';
+    const id = String(winnerId).toLowerCase();
+    if (id === 'partya' || id === 'a') return 'partyA';
+    if (id === 'partyb' || id === 'b') return 'partyB';
+    const m = id.match(/:(\d+)$/);
+    if (m) {
+      const idx = parseInt(m[1], 10);
+      return idx === 2 ? 'partyB' : 'partyA';
     }
-    return this.fallbackFromEvidence(capped, winnerId, input.locale);
+    return 'partyA';
+  }
+
+  private toPartyDisplayName(
+    label: 'partyA' | 'partyB',
+    partyAName?: string,
+    partyBName?: string
+  ): string {
+    const defaultName = label === 'partyA' ? 'Party A' : 'Party B';
+    if (label === 'partyA') {
+      return partyAName?.trim() || defaultName;
+    }
+    return partyBName?.trim() || defaultName;
   }
 
   private safeParseJSON(raw: string): any {

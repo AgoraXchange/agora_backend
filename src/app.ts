@@ -13,20 +13,21 @@ dotenv.config();
 
 export function createApp() {
   const app = express();
-
-  // Configure trust proxy before any middleware that relies on req.ip (e.g., rate limiters)
-  // Use TRUST_PROXY env if provided, otherwise default to trusting 1 proxy in non-dev envs
+  
+  // Trust proxy configuration (for correct client IPs behind load balancers)
+  // TRUST_PROXY can be: number (hops), 'true'/'false', or subnet list
   const trustProxyEnv = process.env.TRUST_PROXY;
   if (typeof trustProxyEnv !== 'undefined') {
-    let trustValue: any = trustProxyEnv;
-    if (trustProxyEnv === 'true') trustValue = true;
-    else if (trustProxyEnv === 'false') trustValue = false;
-    else if (/^\d+$/.test(trustProxyEnv)) trustValue = parseInt(trustProxyEnv, 10);
-    app.set('trust proxy', trustValue);
-    logger.info('Express trust proxy configured from env', { value: trustValue });
-  } else if ((process.env.NODE_ENV || 'development') !== 'development') {
-    app.set('trust proxy', 1);
-    logger.info('Express trust proxy set to 1 (production default)');
+    const lower = trustProxyEnv.toLowerCase();
+    if (lower === 'true' || lower === 'false') {
+      app.set('trust proxy', lower === 'true');
+    } else if (!isNaN(Number(trustProxyEnv))) {
+      app.set('trust proxy', Number(trustProxyEnv));
+    } else {
+      // Allow passing subnet/CSV per Express semantics
+      app.set('trust proxy', trustProxyEnv);
+    }
+    logger.info('Express trust proxy configured', { value: trustProxyEnv });
   }
 
   // Security middleware

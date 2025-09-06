@@ -77,21 +77,21 @@ export class GeminiJuror extends BaseJuror {
     evaluationB: EvaluationCriteria
   ): Promise<string> {
     const prompt = `
-    Perform a multi-angle, comprehensive evaluation.
+    Perform a multi-faceted comprehensive evaluation.
     
-    Scores for Claim A:
+    Scores for A:
     - Logic: ${evaluationA.logicalCoherence}
     - Evidence: ${evaluationA.evidenceStrength}
     - Plausibility: ${evaluationA.probabilityScore}
     
-    Scores for Claim B:
+    Scores for B:
     - Logic: ${evaluationB.logicalCoherence}
     - Evidence: ${evaluationB.evidenceStrength}
     - Plausibility: ${evaluationB.probabilityScore}
     
     Decision: ${position}
     
-    Briefly explain (within 200 characters) the reasoning from a comprehensive perspective.
+    In 200 characters or fewer, explain the reasoning from a balanced, comprehensive perspective.
     `;
 
     try {
@@ -104,13 +104,12 @@ export class GeminiJuror extends BaseJuror {
         }
       });
       
-      return result.response.text() || 'Decision based on comprehensive evaluation';
+      return result.response.text() || 'Judgment based on comprehensive evaluation';
       
     } catch (error) {
       logger.error('Gemini reasoning generation failed', {
         error: error instanceof Error ? error.message : 'Unknown error'
       });
-      return 'A balanced judgment through multi-angle analysis';
     }
   }
 
@@ -118,9 +117,9 @@ export class GeminiJuror extends BaseJuror {
     other: JurorOpinion,
     mine: JurorOpinion
   ): Promise<string> {
-    return `My comprehensive evaluation aligns with ${other.jurorName}'s analysis.
-    The ${other.currentPosition} position is superior in logic (${(other.evaluationCriteria.logicalCoherence * 100).toFixed(0)}%),
-    evidence (${(other.evaluationCriteria.evidenceStrength * 100).toFixed(0)}%),
+    return `My comprehensive evaluation aligns with ${other.jurorName}'s analysis. 
+    The ${other.currentPosition} stance is superior across logic (${(other.evaluationCriteria.logicalCoherence * 100).toFixed(0)}%), 
+    evidence (${(other.evaluationCriteria.evidenceStrength * 100).toFixed(0)}%), 
     and practicality.`;
   }
 
@@ -129,46 +128,46 @@ export class GeminiJuror extends BaseJuror {
     mine: JurorOpinion
   ): Promise<string> {
     const alternativeView = mine.currentPosition === 'A' 
-      ? 'We should also consider the strengths of position B'
-      : 'It seems you may be underestimating the strengths of position A';
+      ? 'We should also consider strengths of stance B'
+      : 'It seems the strengths of stance A are being underestimated';
     
-    return `${other.jurorName}, have you considered other perspectives? ${alternativeView}.
-    From a comprehensive evaluation, the ${mine.currentPosition} position is ${(mine.confidenceLevel * 100).toFixed(0)}% more balanced.
-    A multi-angle analysis is needed.`;
+    return `${other.jurorName}, have you considered the alternative perspective? ${alternativeView}. 
+    On a comprehensive evaluation, the ${mine.currentPosition} stance is ${(mine.confidenceLevel * 100).toFixed(0)}% more balanced. 
+    A multi-perspective analysis is needed.`;
   }
 
   protected async generateQuestionStatement(
     other: JurorOpinion,
     mine: JurorOpinion
   ): Promise<string> {
-    return `${other.jurorName}, how did you evaluate other aspects of the ${other.currentPosition} position?
-    It seems there are factors you may not have considered. A comprehensive review appears necessary.`;
+    return `${other.jurorName}, how did you evaluate other aspects of the ${other.currentPosition} stance? 
+    From my view, there seem to be factors not yet considered. A comprehensive review appears necessary.`;
   }
 
   protected async generateClarificationQuestion(other: JurorOpinion): Promise<string> {
-    return `${other.jurorName}, how did you set the weights of your evaluation criteria?
-    Did you consider logic, evidence, context, and practicality in aggregate?`;
+    return `${other.jurorName}, how did you set the weights for your evaluation criteria? 
+    Did you comprehensively consider logic, evidence, context, and practicality?`;
   }
 
   protected async generateResistanceStatement(
     argument: JuryDiscussion,
     mine: JurorOpinion
   ): Promise<string> {
-    return `${argument.speakerName}'s viewpoint has merit.
-    However, the results of my multi-angle analysis still support ${mine.currentPosition}.
-    This is the conclusion when all factors are considered in balance.`;
+    return `${argument.speakerName}'s perspective has merit. 
+    However, my multi-perspective analysis still supports ${mine.currentPosition}. 
+    This is the conclusion after balancing all factors.`;
   }
 
   protected async generateAnswer(
     question: JuryDiscussion,
     mine: JurorOpinion
   ): Promise<string> {
-    return `Answering ${question.speakerName}'s question:
+    return `Answering ${question.speakerName}'s question. 
     My comprehensive evaluation is as follows:
     1) Logical aspect: ${(mine.evaluationCriteria.logicalCoherence * 100).toFixed(0)}%
     2) Evidential aspect: ${(mine.evaluationCriteria.evidenceStrength * 100).toFixed(0)}%
     3) Contextual aspect: ${(mine.evaluationCriteria.premiseValidity * 100).toFixed(0)}%
     4) Practical aspect: ${(mine.evaluationCriteria.probabilityScore * 100).toFixed(0)}%
-    Considering all aspects in balance, ${mine.currentPosition} is more valid.`;
+    Balancing all aspects, the ${mine.currentPosition} stance is more justified.`;
   }
 }

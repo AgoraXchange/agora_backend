@@ -73,19 +73,19 @@ export class GPT5Juror extends BaseJuror {
     const prompt = `
     You are a strict logical analyst.
     
-    Evaluation of Claim A:
+    Evaluation of A:
     - Premise validity: ${evaluationA.premiseValidity}
     - Logical coherence: ${evaluationA.logicalCoherence}
     - Evidence strength: ${evaluationA.evidenceStrength}
     
-    Evaluation of Claim B:
+    Evaluation of B:
     - Premise validity: ${evaluationB.premiseValidity}
     - Logical coherence: ${evaluationB.logicalCoherence}
     - Evidence strength: ${evaluationB.evidenceStrength}
     
     Decision: ${position}
     
-    Briefly explain (within 200 characters) the logical rationale. Emphasize formal logic and deductive reasoning.
+    In 200 characters or fewer, explain the reasoning, prioritizing formal logic and deductive inference.
     `;
 
     try {
@@ -96,12 +96,13 @@ export class GPT5Juror extends BaseJuror {
         max_completion_tokens: 500
       } as any);
       
-      return response.choices[0]?.message?.content || 'Decision based on logical analysis';
+      return response.choices[0]?.message?.content || 'Judgment based on logical analysis';
+      
     } catch (error) {
       logger.error('GPT-5 reasoning generation failed', {
         error: error instanceof Error ? error.message : 'Unknown error'
       });
-      return 'Evaluation based on logical validity';
+      return 'Evaluation based on logical validity and coherence';
     }
   }
 
@@ -109,7 +110,7 @@ export class GPT5Juror extends BaseJuror {
     other: JurorOpinion,
     mine: JurorOpinion
   ): Promise<string> {
-    return `I agree with ${other.jurorName}'s analysis. In particular, the premise validity assessment of ${
+    return `I agree with ${other.jurorName}'s analysis. In particular, the premise validity assessment ${
       (other.evaluationCriteria.premiseValidity * 100).toFixed(0)
     }% is accurate. The conclusion is also sound in terms of logical coherence.`;
   }
@@ -119,48 +120,48 @@ export class GPT5Juror extends BaseJuror {
     mine: JurorOpinion
   ): Promise<string> {
     const weakPoint = other.evaluationCriteria.premiseValidity < 0.5 
-      ? '전제의 타당성' 
+      ? 'premise validity' 
       : other.evaluationCriteria.logicalCoherence < 0.5 
-        ? '논리적 일관성' 
-        : '증거의 신뢰성';
+        ? 'logical coherence' 
+        : 'evidential reliability';
     
-    return `I challenge ${other.jurorName}'s judgment. ${weakPoint} is insufficient.
-    According to my analysis, the ${mine.currentPosition} position is ${
+    return `I challenge ${other.jurorName}'s judgment. ${weakPoint} is insufficient. 
+    In my analysis, the ${mine.currentPosition} stance is logically ${
       (mine.confidenceLevel * 100).toFixed(0)
-    }% more logically valid. There is a clear advantage in formal logic.`;
+    }% more justified. There is a clear advantage in formal logic.`;
   }
 
   protected async generateQuestionStatement(
     other: JurorOpinion,
     mine: JurorOpinion
   ): Promise<string> {
-    return `${other.jurorName}, how do you account for the logical leap in the ${other.currentPosition} position?
-    The deduction from premises to conclusion appears unclear.`;
+    return `${other.jurorName}, how do you account for the logical leap in the ${other.currentPosition} stance? 
+    The deductive path from premises to conclusion appears unclear.`;
   }
 
   protected async generateClarificationQuestion(other: JurorOpinion): Promise<string> {
-    return `${other.jurorName}, could you clarify the necessary and sufficient conditions for that claim?
-    Please explain the logical implication relations more concretely.`;
+    return `${other.jurorName}, could you clarify the necessary and sufficient conditions for your claim? 
+    Please elaborate the logical implications more concretely.`;
   }
 
   protected async generateResistanceStatement(
     argument: JuryDiscussion,
     mine: JurorOpinion
   ): Promise<string> {
-    return `I have reviewed ${argument.speakerName}'s point, but there are logical errors.
-    The formal logical validity of my analysis remains unchanged.
-    The deductive superiority of the ${mine.currentPosition} position is still clear.`;
+    return `I reviewed ${argument.speakerName}'s point, but there is a logical error. 
+    The formal logical validity of my analysis remains intact. 
+    The deductive advantage of the ${mine.currentPosition} stance is still clear.`;
   }
 
   protected async generateAnswer(
     question: JuryDiscussion,
     mine: JurorOpinion
   ): Promise<string> {
-    return `In response to ${question.speakerName}'s question:
-    The logical basis of my judgment is as follows:
+    return `Answering ${question.speakerName}'s question. 
+    The logical grounds of my judgment are:
     1) Premise validity: ${(mine.evaluationCriteria.premiseValidity * 100).toFixed(0)}%
     2) Logical coherence: ${(mine.evaluationCriteria.logicalCoherence * 100).toFixed(0)}%
-    3) No contradictions under formal logic
-    Therefore, the ${mine.currentPosition} position is valid.`;
+    3) No contradiction under formal logic
+    Therefore, the ${mine.currentPosition} stance is justified.`;
   }
 }

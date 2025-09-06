@@ -24,7 +24,7 @@ export class DiscussionManager {
       // 1. Determine speaking order (lower confidence first - uncertain jurors ask first)
       const speakingOrder = this.determineSpeakingOrder(jurors);
       
-      // 2. Each juror speaks in sequence
+      // 2. Each juror speaks in order
       for (const speaker of speakingOrder) {
         const speakerInstance = jurorInstances.get(speaker.jurorId);
         if (!speakerInstance) continue;
@@ -40,7 +40,8 @@ export class DiscussionManager {
           const listenerInstance = jurorInstances.get(listener.jurorId);
           if (!listenerInstance) continue;
           
-          // Interact when there are differences of opinion
+
+          // Interact when there is a difference of opinion
           if (this.shouldInteract(speaker, listener)) {
             const interaction = await speakerInstance.respondToOpinion(listener, speaker);
             discussions.push(interaction);
@@ -57,7 +58,7 @@ export class DiscussionManager {
         }
       }
       
-      // 3. Additional persuasion attempts (when disagreement remains)
+      // 3. Additional persuasion attempts (when opinions differ)
       if (!this.isUnanimous(jurors) && round > 1) {
         const persuasions = await this.generatePersuasionAttempts(
           jurors, 
@@ -67,7 +68,7 @@ export class DiscussionManager {
         discussions.push(...persuasions);
       }
       
-      // 4. Q&A round (when there are undecided jurors)
+      // 4. Question round (if there are undecided jurors)
       const undecidedJurors = jurors.filter(j => j.currentPosition === 'UNDECIDED');
       if (undecidedJurors.length > 0) {
         const questions = await this.generateQuestions(
@@ -124,19 +125,20 @@ export class DiscussionManager {
   
   private shouldInteract(speaker: JurorOpinion, listener: JurorOpinion): boolean {
     // Interaction conditions
-    // 1. When positions differ
+    // 1) Different positions
     if (speaker.currentPosition !== listener.currentPosition && 
         speaker.currentPosition !== 'UNDECIDED' && 
         listener.currentPosition !== 'UNDECIDED') {
       return true;
     }
     
-    // 2. When either side is UNDECIDED
+
+    // 2) One side is UNDECIDED
     if (speaker.currentPosition === 'UNDECIDED' || listener.currentPosition === 'UNDECIDED') {
       return true;
     }
     
-    // 3. When confidence gap is large (even if same position)
+    // 3) Large confidence gap (even with same stance)
     if (Math.abs(speaker.confidenceLevel - listener.confidenceLevel) > 0.3) {
       return true;
     }
@@ -158,7 +160,7 @@ export class DiscussionManager {
   ): Promise<JuryDiscussion[]> {
     const persuasions: JuryDiscussion[] = [];
     
-    // The most confident juror attempts to persuade the least confident juror
+    // Most confident juror attempts to persuade the least confident juror
     const sortedByConfidence = [...jurors].sort((a, b) => b.confidenceLevel - a.confidenceLevel);
     const mostConfident = sortedByConfidence[0];
     const leastConfident = sortedByConfidence[sortedByConfidence.length - 1];
@@ -173,9 +175,9 @@ export class DiscussionManager {
           `persuasion_${mostConfident.jurorId}_${Date.now()}`,
           mostConfident.jurorId,
           mostConfident.jurorName,
-          `${leastConfident.jurorName}, please reconsider my position.
-          ${mostConfident.keyArguments[0]} is clear evidence.
-          The ${mostConfident.currentPosition} position is ${(mostConfident.confidenceLevel * 100).toFixed(0)}% certain.`,
+          `${leastConfident.jurorName}, I ask you to reconsider my stance. 
+          ${mostConfident.keyArguments[0]} is clear evidence. 
+          The ${mostConfident.currentPosition} stance is ${(mostConfident.confidenceLevel * 100).toFixed(0)}% certain.`,
           'challenge',
           'assertive',
           0.8, // 높은 설득 의도
@@ -218,7 +220,7 @@ export class DiscussionManager {
           `question_${undecided.jurorId}_${Date.now()}`,
           undecided.jurorId,
           undecided.jurorName,
-          `${mostConfident.jurorName}, could you elaborate on the key rationale for the ${mostConfident.currentPosition} position?`,
+          `${mostConfident.jurorName}, could you elaborate on the key basis for the ${mostConfident.currentPosition} stance?`,
           'question',
           'questioning',
           0.3,

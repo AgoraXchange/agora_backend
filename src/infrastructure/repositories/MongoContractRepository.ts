@@ -47,42 +47,50 @@ export class MongoContractRepository implements IContractRepository {
 
   private async createIndexes(): Promise<void> {
     try {
-      // Ensure unique index on contractAddress, handling existing non-unique index gracefully
-      const keySpec = { contractAddress: 1 } as const;
-      const uniqueIndexName = 'contractAddress_1';
+      // Inspect existing indexes to avoid name/option conflicts
+      let indexes: any[] = [];
+      try { indexes = await this.collection.indexes(); } catch {}
 
-      const indexes = await this.collection.listIndexes().toArray();
-      const existing = indexes.find(i => JSON.stringify(i.key) === JSON.stringify(keySpec));
-
-      if (!existing) {
-        await this.collection.createIndex(keySpec, { unique: true, name: uniqueIndexName });
-      } else if (!existing.unique) {
-        // Check for duplicates before attempting to convert to a unique index
-        const duplicates = await this.collection
-          .aggregate([
-            { $group: { _id: '$contractAddress', count: { $sum: 1 } } },
-            { $match: { count: { $gt: 1 } } },
-            { $limit: 1 },
-          ])
-          .toArray();
-
-        if (duplicates.length > 0) {
-          logger.warn('Duplicate contractAddress detected; skipping unique index creation', {
-            indexName: existing.name,
+      const addrIdx = indexes.find((i: any) => i.name === 'contractAddress_1');
+      if (addrIdx?.unique) {
+        // Drop unique index so we can allow multiple logical contracts per address
+        try {
+          await this.collection.dropIndex('contractAddress_1');
+          logger.warn('Dropped unique index contractAddress_1 to allow multiple contracts per address');
+        } catch (dropErr) {
+          logger.warn('Failed to drop unique index contractAddress_1 (may not exist or in use)', {
+            error: dropErr instanceof Error ? dropErr.message : String(dropErr)
           });
-        } else {
-          // No duplicates; drop old non-unique index and create the unique one
-          const nameToDrop = existing.name ?? uniqueIndexName;
-          await this.collection.dropIndex(nameToDrop);
-          await this.collection.createIndex(keySpec, { unique: true, name: uniqueIndexName });
         }
       }
 
-      // Ensure other helpful indexes (idempotent, with explicit names to avoid conflicts)
-      await this.collection.createIndex({ status: 1, bettingEndTime: 1 }, { name: 'status_1_bettingEndTime_1' });
-      await this.collection.createIndex({ winnerId: 1 }, { name: 'winnerId_1' });
+      // Ensure a non-unique index on contractAddress for lookup performance
+      try {
+        await this.collection.createIndex({ contractAddress: 1 }, { unique: false, name: 'contractAddress_1' });
+      } catch (createErr) {
+        // If an index with same name already exists, it's fine
+        logger.debug('contractAddress_1 index creation skipped or already exists', {
+          error: createErr instanceof Error ? createErr.message : 'unknown'
+        });
+      }
 
-      logger.info('MongoDB indexes ensured for contracts collection');
+      // Add compound unique index for (contractAddress, _id) to retain uniqueness per logical contract
+      try {
+        await this.collection.createIndex(
+          { contractAddress: 1, _id: 1 },
+          { unique: true, name: 'contractAddress_1__id_1_unique' }
+        );
+      } catch (cmpErr) {
+        logger.debug('Compound unique index creation skipped or already exists', {
+          error: cmpErr instanceof Error ? cmpErr.message : 'unknown'
+        });
+      }
+
+      // Additional helper indexes (idempotent)
+      try { await this.collection.createIndex({ status: 1, bettingEndTime: 1 }, { name: 'status_1_bettingEndTime_1' }); } catch {}
+      try { await this.collection.createIndex({ winnerId: 1 }, { name: 'winnerId_1' }); } catch {}
+
+      logger.info('MongoDB indexes created for contracts collection');
     } catch (error) {
       logger.error('Failed to ensure indexes', { error: error instanceof Error ? error.message : 'Unknown error' });
     }
@@ -121,7 +129,7 @@ export class MongoContractRepository implements IContractRepository {
 
   async save(contract: Contract): Promise<void> {
     const doc = this.entityToDocument(contract);
-    // Use upsert to be idempotent under concurrent markEnded calls
+    // Use upsert for idempotency under concurrent close/seed flows
     await this.collection.replaceOne({ _id: contract.id }, doc, { upsert: true });
     logger.info('Contract saved', { contractId: contract.id });
   }
