@@ -545,9 +545,17 @@ export class EthereumService implements IBlockchainService {
     this.scheduleWsReconnect();
   }
 
-  // Health monitoring for WS provider when underlying socket is not accessible
+  // Health monitoring for WS provider; prefer socket state when accessible
   private async pingWsProvider(timeoutMs: number = 5000): Promise<boolean> {
     if (!this.wsProvider) return false;
+    const provAny: any = this.wsProvider as any;
+    const ws: any = provAny._websocket ?? provAny._ws ?? provAny._socket;
+    // If we can inspect the underlying socket and it's OPEN, consider healthy
+    if (ws && typeof ws.readyState === 'number' && ws.readyState === 1 /* OPEN */) {
+      return true;
+    }
+
+    // Fallback: probe via a lightweight RPC (may fail on some providers)
     const prov = this.wsProvider;
     return await new Promise<boolean>((resolve) => {
       let settled = false;
@@ -583,15 +591,26 @@ export class EthereumService implements IBlockchainService {
     this.wsHealthFailures = 0;
     if (!this.wsProvider) return;
 
-    // Check every 15s with 5s timeout
+    // Configurable cadence and thresholds (with sensible defaults)
+    const enabled = (process.env.WS_HEALTHCHECK_ENABLED ?? 'true').toLowerCase() !== 'false';
+    if (!enabled) return;
+
+    const intervalMs = Math.max(5000, Number(process.env.WS_HEALTHCHECK_INTERVAL_MS ?? 30000));
+    const timeoutMs = Math.max(1000, Number(process.env.WS_HEALTHCHECK_TIMEOUT_MS ?? 8000));
+    const failureThreshold = Math.max(1, Number(process.env.WS_HEALTHCHECK_FAILURE_THRESHOLD ?? 6));
+
+    // Check on an interval
     this.wsHealthTimer = setInterval(async () => {
       try {
         if (!this.wsProvider) return;
-        const ok = await this.pingWsProvider(5000);
+        const ok = await this.pingWsProvider(timeoutMs);
         if (!ok) {
           this.wsHealthFailures++;
-          logger.warn('WebSocket health check failed', { failures: this.wsHealthFailures });
-          if (this.wsHealthFailures >= 3) {
+          // Downgrade intermittent failure to debug to reduce noise
+          if (this.wsHealthFailures < failureThreshold) {
+            logger.debug('WebSocket health check failed', { failures: this.wsHealthFailures });
+          }
+          if (this.wsHealthFailures >= failureThreshold) {
             logger.warn('WebSocket unhealthy; forcing reconnect');
             try { (this.wsProvider as any).destroy?.(); } catch {}
             this.scheduleWsReconnect();
@@ -604,7 +623,7 @@ export class EthereumService implements IBlockchainService {
       } catch (err) {
         logger.warn('WebSocket health monitor error', { error: err instanceof Error ? err.message : String(err) });
       }
-    }, 15000);
+    }, intervalMs);
   }
 
   private stopWsHealthMonitor(): void {

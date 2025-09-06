@@ -9,6 +9,7 @@ import { Party } from '../../domain/entities/Party';
 import { IOracleDecisionRepository } from '../../domain/repositories/IOracleDecisionRepository';
 import { DecisionCoordinator } from '../../infrastructure/coordination/DecisionCoordinator';
 import { DeliberationEventEmitter } from '../../infrastructure/committee/events/DeliberationEventEmitter';
+import { IWinnerArgumentsCache } from '../../domain/repositories/IWinnerArgumentsCache';
 import { logger } from '../../infrastructure/logging/Logger';
 
 @injectable()
@@ -306,6 +307,16 @@ export class OracleController {
         return;
       }
 
+      // If winner-arguments are already stored with the decision, return them (minimal invasive read path)
+      try {
+        const { isWinnerJuryArguments } = await import('../../domain/valueObjects/WinnerJuryArguments');
+        const stored = (decision.metadata as any)?.dataPoints?.winnerArguments;
+        if (stored && isWinnerJuryArguments(stored)) {
+          res.status(200).json({ success: true, data: stored, cached: true });
+          return;
+        }
+      } catch {}
+
       // Try to use real deliberation messages first
       let messages = emitter.getMessageHistory(String(contractId));
       if (!messages || messages.length === 0) {
@@ -334,6 +345,21 @@ export class OracleController {
 
       const { ClaudeJurySynthesisService } = await import('../../infrastructure/ai/ClaudeJurySynthesisService');
       const service = new ClaudeJurySynthesisService();
+
+      // Best-effort: fetch contract to provide human-readable party names
+      let partyAName: string | undefined;
+      let partyBName: string | undefined;
+      let topic: string | undefined;
+      try {
+        const contracts = container.get<IContractRepository>('IContractRepository');
+        const contract = await contracts.findById(String(contractId));
+        if (contract) {
+          partyAName = contract.partyA?.name || undefined;
+          partyBName = contract.partyB?.name || undefined;
+          topic = contract.topic || undefined;
+        }
+      } catch {}
+
       const data = await service.generate({
         winnerId: decision.winnerId,
         contractId: String(contractId),
@@ -342,8 +368,12 @@ export class OracleController {
         topic: contract?.topic,
         description: contract?.description
       });
+      // Persist generated arguments to decision metadata (best-effort)
+      try {
+        await decisionRepo.saveWinnerArguments(String(contractId), data);
+      } catch {}
 
-      res.status(200).json({ success: true, data });
+      res.status(200).json({ success: true, data, cached: false });
     } catch (error) {
       logger.error('Failed to get winner arguments', {
         contractId: req.params.contractId,

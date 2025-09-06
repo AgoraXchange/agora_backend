@@ -121,7 +121,8 @@ export class MongoContractRepository implements IContractRepository {
 
   async save(contract: Contract): Promise<void> {
     const doc = this.entityToDocument(contract);
-    await this.collection.insertOne(doc);
+    // Use upsert for idempotency under concurrent close/seed flows
+    await this.collection.replaceOne({ _id: contract.id }, doc, { upsert: true });
     logger.info('Contract saved', { contractId: contract.id });
   }
 

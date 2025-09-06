@@ -638,7 +638,7 @@ export class CommitteeOrchestrator implements ICommitteeService {
 
   private initializeConfiguration(): void {
     this.config = {
-      enabledProposers: (process.env.COMMITTEE_ENABLED_PROPOSERS || 'gpt4,claude,gemini').split(','),
+      enabledProposers: (process.env.COMMITTEE_ENABLED_PROPOSERS || 'gpt5,critic,pro_analyst').split(','),
       judgeConfiguration: {
         ruleBasedWeight: parseFloat(process.env.JUDGE_RULE_BASED_WEIGHT || '0.4'),
         llmWeight: parseFloat(process.env.JUDGE_LLM_WEIGHT || '0.6'),

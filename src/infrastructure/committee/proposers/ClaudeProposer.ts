@@ -6,24 +6,24 @@ import Anthropic from '@anthropic-ai/sdk';
 @injectable()
 export class ClaudeProposer extends BaseProposer {
   readonly agentId = 'claude';
-  readonly agentName = 'Claude Constitutional AI';
-  readonly agentType = 'claude';
+  readonly agentName = 'Critic';
+  readonly agentType = 'critic';
 
   protected getDefaultConfig(): ProposerConfig {
     return {
       temperature: 0.6, // Claude typically uses lower temperature
       maxTokens: 2000,
       topP: 0.85,
-      systemPrompt: `Claude analyzing smart contract disputes with ethical focus.
+      systemPrompt: `Critic analyzing debate with logical focus.
 
 Return JSON:
 {
   "winner": "partyA" or "partyB",
   "confidence": 0.0-1.0,
-  "rationale": "ethical reasoning (max 100 words)",
+  "rationale": "logical reasoning (max 100 words)",
   "evidence": ["point 1", "point 2"],
-  "methodology": "constitutional analysis",
-  "ethical_considerations": "brief ethics note",
+  "methodology": "rational analysis",
+  "logical_considerations": "brief logic note",
   "uncertainty_factors": ["uncertainty 1"]
 }`,
       userPromptTemplate: `Contract {CONTRACT_ID}
@@ -36,12 +36,12 @@ Party B: {PARTY_B_NAME} ({PARTY_B_ADDRESS})
 
 Context: {CONTEXT}
 
-Analyze ethically. Return JSON.`
+Analyze logically. Return JSON.`
     };
   }
 
   protected getModelName(): string {
-    return process.env.CLAUDE_MODEL || 'claude-3-sonnet';
+    return process.env.CLAUDE_MODEL || 'claude-sonnet-4-20250514';
   }
 
   protected async callAIModel(prompt: string, temperature: number): Promise<{
@@ -54,10 +54,10 @@ Analyze ethically. Return JSON.`
     rawResponse: any;
   }> {
     // Check if we should use mock mode
-    const apiKey = process.env.CLAUDE_API_KEY;
+    const apiKey = process.env.ANTHROPIC_API_KEY;
     
     if (!apiKey || apiKey === 'mock' || apiKey.includes('mock_claude')) {
-      logger.debug('Using mock Claude response (mock mode enabled)');
+      logger.debug('Using mock critic response (mock mode enabled)');
       return this.getMockClaudeResponse(prompt);
     }
     
@@ -69,7 +69,7 @@ Analyze ethically. Return JSON.`
       });
 
       // Implement real Claude API call
-      const anthropic = new Anthropic({ apiKey: process.env.CLAUDE_API_KEY });
+      const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
       
       const message = await anthropic.messages.create({
         model: this.getModelName(),
@@ -103,8 +103,8 @@ Analyze ethically. Return JSON.`
           confidence: 0.75,
           rationale: textContent,
           evidence: ['Based on Claude analysis'],
-          methodology: 'constitutional analysis with emphasis on fairness',
-          ethical_considerations: 'Analysis completed with Claude',
+          methodology: 'debate analysis with emphasis on logic',
+          ethical_considerations: 'Analysis completed with Critic',
           uncertainty_factors: ['Response parsing uncertainty']
         };
       }
@@ -155,7 +155,7 @@ Analyze ethically. Return JSON.`
         'Consistency with legal precedents'
       ],
       methodology: 'constitutional analysis with emphasis on fairness',
-      ethical_considerations: 'Ensured impartial evaluation respecting both parties\' rights and maintaining procedural fairness',
+      logical_considerations: 'Ensured impartial evaluation respecting both parties\' rights and maintaining procedural fairness',
       uncertainty_factors: [
         'Limited contextual information',
         'Potential for additional evidence',

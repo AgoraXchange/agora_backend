@@ -10,7 +10,7 @@ import { logger } from '../../logging/Logger';
 @injectable()
 export class GeminiJuror extends BaseJuror {
   readonly jurorId: JurorId = 'gemini';
-  readonly jurorName = 'Gemini 종합평가관';
+  readonly jurorName = 'Gemini Comprehensive Evaluator';
   
   readonly personality: JurorPersonality = {
     analyticalDepth: 0.7,       // 적당한 분석 깊이
@@ -41,7 +41,7 @@ export class GeminiJuror extends BaseJuror {
   }
 
   protected evaluateArgument(analysis: ArgumentAnalysis): EvaluationCriteria {
-    // Gemini는 다각도 종합 평가
+    // Gemini performs multi-angle comprehensive evaluation
     const logicalStrength = analysis.calculateLogicalStrength();
     
     // 균형잡힌 평가 - 극단값 회피
@@ -77,21 +77,21 @@ export class GeminiJuror extends BaseJuror {
     evaluationB: EvaluationCriteria
   ): Promise<string> {
     const prompt = `
-    다각도 종합 평가 수행.
+    Perform a multi-faceted comprehensive evaluation.
     
-    A 주장 점수:
-    - 논리: ${evaluationA.logicalCoherence}
-    - 증거: ${evaluationA.evidenceStrength}
-    - 개연성: ${evaluationA.probabilityScore}
+    Scores for A:
+    - Logic: ${evaluationA.logicalCoherence}
+    - Evidence: ${evaluationA.evidenceStrength}
+    - Plausibility: ${evaluationA.probabilityScore}
     
-    B 주장 점수:
-    - 논리: ${evaluationB.logicalCoherence}
-    - 증거: ${evaluationB.evidenceStrength}
-    - 개연성: ${evaluationB.probabilityScore}
+    Scores for B:
+    - Logic: ${evaluationB.logicalCoherence}
+    - Evidence: ${evaluationB.evidenceStrength}
+    - Plausibility: ${evaluationB.probabilityScore}
     
-    결정: ${position}
+    Decision: ${position}
     
-    종합적 관점에서 판단 근거를 200자 이내로 설명.
+    In 200 characters or fewer, explain the reasoning from a balanced, comprehensive perspective.
     `;
 
     try {
@@ -104,13 +104,12 @@ export class GeminiJuror extends BaseJuror {
         }
       });
       
-      return result.response.text() || '종합적 평가 기반 판단';
+      return result.response.text() || 'Judgment based on comprehensive evaluation';
       
     } catch (error) {
       logger.error('Gemini reasoning generation failed', {
         error: error instanceof Error ? error.message : 'Unknown error'
       });
-      return '다각도 분석을 통한 균형잡힌 판단';
     }
   }
 
@@ -118,10 +117,10 @@ export class GeminiJuror extends BaseJuror {
     other: JurorOpinion,
     mine: JurorOpinion
   ): Promise<string> {
-    return `${other.jurorName}의 분석과 제 종합 평가가 일치합니다. 
-    ${other.currentPosition} 주장이 논리(${(other.evaluationCriteria.logicalCoherence * 100).toFixed(0)}%), 
-    증거(${(other.evaluationCriteria.evidenceStrength * 100).toFixed(0)}%), 
-    실용성 측면에서 모두 우위에 있습니다.`;
+    return `My comprehensive evaluation aligns with ${other.jurorName}'s analysis. 
+    The ${other.currentPosition} stance is superior across logic (${(other.evaluationCriteria.logicalCoherence * 100).toFixed(0)}%), 
+    evidence (${(other.evaluationCriteria.evidenceStrength * 100).toFixed(0)}%), 
+    and practicality.`;
   }
 
   protected async generateChallengeStatement(
@@ -129,46 +128,46 @@ export class GeminiJuror extends BaseJuror {
     mine: JurorOpinion
   ): Promise<string> {
     const alternativeView = mine.currentPosition === 'A' 
-      ? 'B 주장의 장점도 고려해야 합니다'
-      : 'A 주장의 강점을 과소평가하신 것 같습니다';
+      ? 'We should also consider strengths of stance B'
+      : 'It seems the strengths of stance A are being underestimated';
     
-    return `${other.jurorName}님, 다른 관점도 고려해보셨나요? ${alternativeView}. 
-    종합적으로 평가하면 ${mine.currentPosition} 주장이 ${(mine.confidenceLevel * 100).toFixed(0)}% 더 균형잡혀 있습니다. 
-    다각도 분석이 필요합니다.`;
+    return `${other.jurorName}, have you considered the alternative perspective? ${alternativeView}. 
+    On a comprehensive evaluation, the ${mine.currentPosition} stance is ${(mine.confidenceLevel * 100).toFixed(0)}% more balanced. 
+    A multi-perspective analysis is needed.`;
   }
 
   protected async generateQuestionStatement(
     other: JurorOpinion,
     mine: JurorOpinion
   ): Promise<string> {
-    return `${other.jurorName}님, ${other.currentPosition} 주장의 다른 측면은 어떻게 평가하셨습니까? 
-    제가 볼 때는 고려하지 않으신 요소들이 있는 것 같습니다. 종합적 검토가 필요해 보입니다.`;
+    return `${other.jurorName}, how did you evaluate other aspects of the ${other.currentPosition} stance? 
+    From my view, there seem to be factors not yet considered. A comprehensive review appears necessary.`;
   }
 
   protected async generateClarificationQuestion(other: JurorOpinion): Promise<string> {
-    return `${other.jurorName}님, 평가 기준의 가중치를 어떻게 설정하셨는지 궁금합니다. 
-    논리, 증거, 맥락, 실용성을 종합적으로 고려하셨는지요?`;
+    return `${other.jurorName}, how did you set the weights for your evaluation criteria? 
+    Did you comprehensively consider logic, evidence, context, and practicality?`;
   }
 
   protected async generateResistanceStatement(
     argument: JuryDiscussion,
     mine: JurorOpinion
   ): Promise<string> {
-    return `${argument.speakerName}의 관점도 일리가 있습니다. 
-    하지만 제가 수행한 다각도 분석 결과는 여전히 ${mine.currentPosition}를 지지합니다. 
-    모든 요소를 균형있게 고려했을 때의 결론입니다.`;
+    return `${argument.speakerName}'s perspective has merit. 
+    However, my multi-perspective analysis still supports ${mine.currentPosition}. 
+    This is the conclusion after balancing all factors.`;
   }
 
   protected async generateAnswer(
     question: JuryDiscussion,
     mine: JurorOpinion
   ): Promise<string> {
-    return `${question.speakerName}의 질문에 답변드립니다. 
-    제 종합 평가는 다음과 같습니다:
-    1. 논리적 측면: ${(mine.evaluationCriteria.logicalCoherence * 100).toFixed(0)}%
-    2. 증거적 측면: ${(mine.evaluationCriteria.evidenceStrength * 100).toFixed(0)}%
-    3. 맥락적 측면: ${(mine.evaluationCriteria.premiseValidity * 100).toFixed(0)}%
-    4. 실용적 측면: ${(mine.evaluationCriteria.probabilityScore * 100).toFixed(0)}%
-    모든 측면을 균형있게 평가한 결과 ${mine.currentPosition}가 더 타당합니다.`;
+    return `Answering ${question.speakerName}'s question. 
+    My comprehensive evaluation is as follows:
+    1) Logical aspect: ${(mine.evaluationCriteria.logicalCoherence * 100).toFixed(0)}%
+    2) Evidential aspect: ${(mine.evaluationCriteria.evidenceStrength * 100).toFixed(0)}%
+    3) Contextual aspect: ${(mine.evaluationCriteria.premiseValidity * 100).toFixed(0)}%
+    4) Practical aspect: ${(mine.evaluationCriteria.probabilityScore * 100).toFixed(0)}%
+    Balancing all aspects, the ${mine.currentPosition} stance is more justified.`;
   }
 }

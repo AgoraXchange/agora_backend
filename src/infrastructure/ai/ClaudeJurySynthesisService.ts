@@ -16,19 +16,41 @@ export interface JurySynthesisInput {
 export class ClaudeJurySynthesisService {
   private claude: Anthropic | null = null;
   private readonly model: string;
+  private readonly driver: 'local' | 'anthropic';
 
   constructor() {
     const apiKey = process.env.ANTHROPIC_API_KEY;
     this.model = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
-    if (apiKey) {
-      this.claude = new Anthropic({ apiKey });
+    
+    // Auto-enable anthropic driver if API key is available (unless explicitly set to local)
+    const driverEnv = process.env.JURY_SYNTHESIS_DRIVER;
+    if (driverEnv === 'local') {
+      this.driver = 'local';
+    } else if (driverEnv === 'anthropic' || apiKey) {
+      this.driver = 'anthropic';
     } else {
-      logger.warn('ANTHROPIC_API_KEY not set. Falling back to local synthesis for jury arguments.');
+      this.driver = 'local';
+    }
+    
+    if (apiKey && this.driver === 'anthropic') {
+      this.claude = new Anthropic({ apiKey });
+      logger.info('Claude jury synthesis enabled', { model: this.model });
+    } else {
+      this.claude = null;
+      if (this.driver === 'anthropic') {
+        logger.warn('ANTHROPIC_API_KEY not set. Falling back to local synthesis for jury arguments.');
+        this.driver = 'local'; // Force fallback if no API key
+      } else {
+        logger.info('Using local jury synthesis (no Claude API calls)', { driver: this.driver });
+      }
     }
   }
 
   async generate(input: JurySynthesisInput): Promise<WinnerJuryArguments> {
     const { winnerId, messages, contractId } = input;
+    const winnerLabel = this.toPartyLabel(winnerId);
+    const winnerDisplay = this.toPartyDisplayName(winnerLabel, input.partyAName, input.partyBName);
+    const topicDisplay = (input.topic || '').trim() || (input.locale === 'ko' ? '해당 분쟁 주제' : 'the contract dispute');
 
     const supporting = messages
       .filter(m => m.messageType === 'proposal' && m.content?.winner === winnerId)
@@ -82,20 +104,27 @@ Task:
 - Conclusion must logically follow from Jury1–Jury3 without introducing new facts.
 - Output language: ${language}
 - Output format: a single compact JSON object with keys "Jury1", "Jury2", "Jury3", "Conclusion". No markdown, no code fences, no commentary.
+ - Do not reference internal IDs anywhere; use natural language names only as listed in Entities.
 
 Available supporting items:
 ${capped.map((s, i) => `#${i + 1} Agent=${s.agent}\nRationale=${s.rationale}\nEvidence=${s.evidence.join(' | ')}`).join('\n\n')}
 `;
 
-    if (this.claude) {
+    if (this.claude && this.driver === 'anthropic') {
       try {
-        const resp = await this.claude.messages.create({
+        const timeoutMs = parseInt(process.env.AI_REQUEST_TIMEOUT_MS || '30000', 10);
+        const aiCall = this.claude.messages.create({
           model: this.model,
-          max_tokens: 6000,
+          max_tokens: 1200,
           temperature: 0.2,
           system: header,
           messages: [ { role: 'user', content: instructions } ]
         });
+
+        const resp = await Promise.race([
+          aiCall,
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('AI request timeout')), timeoutMs))
+        ]);
 
         const first = resp.content?.[0];
         const text = first && (first.type === 'text') ? first.text : '';
@@ -108,7 +137,7 @@ ${capped.map((s, i) => `#${i + 1} Agent=${s.agent}\nRationale=${s.rationale}\nEv
         logger.warn('Claude jury synthesis returned unrecognized JSON, using fallback parse', { contractId });
         return this.fallbackFromEvidence(capped, winnerClaim, input.locale, input.topic, input.description);
       } catch (error) {
-        logger.error('Claude jury synthesis failed, using local fallback', {
+        logger.warn('Claude jury synthesis failed, using local fallback', {
           contractId,
           error: error instanceof Error ? error.message : 'Unknown error'
         });
@@ -159,11 +188,16 @@ ${capped.map((s, i) => `#${i + 1} Agent=${s.agent}\nRationale=${s.rationale}\nEv
         : `위의 주장과 근거에 비추어 볼 때, 승자의 주장이 가장 타당합니다: ${text(winnerClaim)}`;
       return ctxLine ? `${ctxLine} ${base}` : base;
     };
+    
+    const conclusion = locale === 'en'
+      ? `Based on the comprehensive analysis above, '${winnerId}' emerges as the most supported winner.`
+      : `위의 종합적인 분석을 바탕으로, '${winnerId}'가 가장 지지받는 승자로 나타납니다.`;
+    
     return {
-      Jury1: arg(0),
-      Jury2: arg(1),
-      Jury3: arg(2),
-      Conclusion: concl()
+      Jury1: generateArg(0),
+      Jury2: generateArg(1), 
+      Jury3: generateArg(2),
+      Conclusion: conclusion
     };
   }
 }

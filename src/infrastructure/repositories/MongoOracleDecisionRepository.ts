@@ -1,6 +1,7 @@
 import { injectable, inject } from 'inversify';
 import { Collection } from 'mongodb';
 import { IOracleDecisionRepository } from '../../domain/repositories/IOracleDecisionRepository';
+import { WinnerJuryArguments } from '../../domain/valueObjects/WinnerJuryArguments';
 import { OracleDecision, DecisionMetadata } from '../../domain/entities/OracleDecision';
 import { MongoDBConnection } from '../database/MongoDBConnection';
 import { logger } from '../logging/Logger';
@@ -57,6 +58,21 @@ export class MongoOracleDecisionRepository implements IOracleDecisionRepository 
       decisionId: decision.id,
       contractId: decision.contractId 
     });
+  }
+
+  async saveWinnerArguments(contractId: string, args: WinnerJuryArguments): Promise<void> {
+    try {
+      await this.collection.updateOne(
+        { contractId },
+        { $set: { 'metadata.dataPoints.winnerArguments': args } }
+      );
+      logger.info('Winner arguments cached to decision metadata', { contractId });
+    } catch (error) {
+      logger.warn('Failed to save winner arguments to decision metadata', {
+        contractId,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
   }
 
   private documentToEntity(doc: OracleDecisionDocument): OracleDecision {
