@@ -11,6 +11,9 @@ export interface JurySynthesisInput {
   /** Optional context for prompt */
   topic?: string;
   description?: string;
+  /** Optional party display names to avoid placeholders */
+  partyAName?: string;
+  partyBName?: string;
 }
 
 export class ClaudeJurySynthesisService {
@@ -93,7 +96,10 @@ export class ClaudeJurySynthesisService {
     const header = `You are a careful logician. Build three distinct logical arguments that support the winner's natural-language claim using the provided evidence and context. Then derive a concise conclusion that follows inevitably from those arguments. Output strict JSON only.`;
     const ctxTopic = input.topic ? `Topic: ${limit(input.topic, 200)}` : '';
     const ctxDesc = input.description ? `Description: ${limit(input.description, 500)}` : '';
-    const contextBlock = [ctxTopic, ctxDesc].filter(Boolean).join('\n');
+    const partiesLine = (input.partyAName || input.partyBName)
+      ? `Participants: ${[input.partyAName, input.partyBName].filter(Boolean).map(n => limit(String(n), 120)).join(' vs ')}`
+      : '';
+    const contextBlock = [ctxTopic, ctxDesc, partiesLine].filter(Boolean).join('\n');
 
     const instructions = `
 Task:
@@ -103,6 +109,7 @@ Task:
 - Each of Jury1/2/3 should be a single, self-contained argument supported by one or more evidence pieces.
 - Conclusion must logically follow from Jury1–Jury3 without introducing new facts.
 - Output language: ${language}
+- When referring to participants, use the given names exactly (if provided) and do not use generic labels like "partyA" or "partyB".
 - Output format: a single compact JSON object with keys "Jury1", "Jury2", "Jury3", "Conclusion". No markdown, no code fences, no commentary.
  - Do not reference internal IDs anywhere; use natural language names only as listed in Entities.
 

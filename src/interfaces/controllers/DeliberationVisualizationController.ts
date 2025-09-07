@@ -54,7 +54,9 @@ export class DeliberationVisualizationController {
         messages,
         locale: lang as any,
         topic: contract?.topic,
-        description: contract?.description
+        description: contract?.description,
+        partyAName: contract?.partyA?.name,
+        partyBName: contract?.partyB?.name
       });
 
       res.json({ success: true, data: result });

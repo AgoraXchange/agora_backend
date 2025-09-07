@@ -366,7 +366,9 @@ export class OracleController {
         messages,
         locale: lang as any,
         topic: contract?.topic,
-        description: contract?.description
+        description: contract?.description,
+        partyAName: contract?.partyA?.name,
+        partyBName: contract?.partyB?.name
       });
       // Persist generated arguments to decision metadata (best-effort)
       try {
