@@ -197,14 +197,35 @@ ${capped.map((s, i) => `#${i + 1} Agent=${s.agent}\nRationale=${s.rationale}\nEv
     };
     
     const conclusion = locale === 'en'
-      ? `Based on the comprehensive analysis above, '${winnerId}' emerges as the most supported winner.`
-      : `위의 종합적인 분석을 바탕으로, '${winnerId}'가 가장 지지받는 승자로 나타납니다.`;
+      ? `Based on the comprehensive analysis above, the winner emerges as the most supported party.`
+      : `위의 종합적인 분석을 바탕으로, 승자가 가장 지지받는 당사자로 나타납니다.`;
     
     return {
-      Jury1: generateArg(0),
-      Jury2: generateArg(1), 
-      Jury3: generateArg(2),
+      Jury1: arg(0),
+      Jury2: arg(1), 
+      Jury3: arg(2),
       Conclusion: conclusion
     };
+  }
+
+  private toPartyLabel(winnerId: string): string {
+    // Convert winner ID to party label (e.g., 'partyA' or 'partyB')
+    // Adjust this logic based on your actual ID format
+    if (winnerId.toLowerCase().includes('partya') || winnerId === '0' || winnerId === 'A') {
+      return 'partyA';
+    } else if (winnerId.toLowerCase().includes('partyb') || winnerId === '1' || winnerId === 'B') {
+      return 'partyB';
+    }
+    return winnerId;
+  }
+
+  private toPartyDisplayName(partyLabel: string, partyAName?: string, partyBName?: string): string {
+    // Convert party label to display name
+    if (partyLabel === 'partyA' && partyAName) {
+      return partyAName;
+    } else if (partyLabel === 'partyB' && partyBName) {
+      return partyBName;
+    }
+    return partyLabel;
   }
 }

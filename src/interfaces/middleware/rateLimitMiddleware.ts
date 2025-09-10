@@ -58,3 +58,17 @@ export const oracleRateLimiter = createRateLimiter(
   60 * 1000, // 1 minute
   isDevelopment ? 100 : 10 // More lenient in development
 );
+
+export const xffBypassMiddleware = (req: Request, _res: Response, next: NextFunction) => {
+  // Middleware to handle X-Forwarded-For header when trust proxy is disabled
+  // This prevents express-rate-limit validation errors
+  const trustProxy = req.app.get('trust proxy');
+  if (!trustProxy && req.headers['x-forwarded-for']) {
+    // Log but don't modify headers to avoid issues
+    logger.debug('X-Forwarded-For present without trust proxy', {
+      xff: req.headers['x-forwarded-for'],
+      ip: req.ip
+    });
+  }
+  next();
+};
