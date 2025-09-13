@@ -19,7 +19,7 @@ export interface JurySynthesisInput {
 export class ClaudeJurySynthesisService {
   private claude: Anthropic | null = null;
   private readonly model: string;
-  private readonly driver: 'local' | 'anthropic';
+  private driver: 'local' | 'anthropic';
 
   constructor() {
     const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -171,6 +171,29 @@ ${capped.map((s, i) => `#${i + 1} Agent=${s.agent}\nRationale=${s.rationale}\nEv
     return null;
   }
 
+  /**
+   * Map a partyId to a logical label. Heuristics:
+   * - IDs ending with ":1" (or containing it) map to partyA; ":2" to partyB
+   * - Fallback to last digit 1/2; default to partyA when unknown
+   */
+  private toPartyLabel(partyId: string): 'partyA' | 'partyB' {
+    const id = String(partyId || '').trim();
+    if (/:1\b/.test(id)) return 'partyA';
+    if (/:2\b/.test(id)) return 'partyB';
+    const last = id.slice(-1);
+    if (last === '1') return 'partyA';
+    if (last === '2') return 'partyB';
+    return 'partyA';
+  }
+
+  private toPartyDisplayName(
+    label: 'partyA' | 'partyB',
+    partyAName?: string,
+    partyBName?: string
+  ): string {
+    return label === 'partyA' ? (partyAName?.trim() || 'Party A') : (partyBName?.trim() || 'Party B');
+  }
+
   private fallbackFromEvidence(
     items: Array<{ agent: string; rationale: string; evidence: string[] }>,
     winnerClaim: string,
@@ -195,15 +218,12 @@ ${capped.map((s, i) => `#${i + 1} Agent=${s.agent}\nRationale=${s.rationale}\nEv
         : `위의 주장과 근거에 비추어 볼 때, 승자의 주장이 가장 타당합니다: ${text(winnerClaim)}`;
       return ctxLine ? `${ctxLine} ${base}` : base;
     };
-    
-    const conclusion = locale === 'en'
-      ? `Based on the comprehensive analysis above, '${winnerId}' emerges as the most supported winner.`
-      : `위의 종합적인 분석을 바탕으로, '${winnerId}'가 가장 지지받는 승자로 나타납니다.`;
-    
+    const conclusion = concl();
+
     return {
-      Jury1: generateArg(0),
-      Jury2: generateArg(1), 
-      Jury3: generateArg(2),
+      Jury1: arg(0),
+      Jury2: arg(1),
+      Jury3: arg(2),
       Conclusion: conclusion
     };
   }
