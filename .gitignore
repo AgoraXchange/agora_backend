@@ -31,3 +31,13 @@ coverage/
 # Temporary files
 tmp/
 temp/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+.env/
+venv/
+env/

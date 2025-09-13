@@ -106,4 +106,8 @@ export class MongoOracleDecisionRepository implements IOracleDecisionRepository 
       createdAt: decision.createdAt
     };
   }
+
+  async count(): Promise<number> {
+    return await this.collection.countDocuments();
+  }
 }

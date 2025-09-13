@@ -189,12 +189,13 @@ export class MongoUserRepository implements IUserRepository {
       doc.username,
       doc.passwordHash,
       doc.role,
-      doc.email,
-      doc.apiKeys,
-      doc.createdAt,
-      doc.updatedAt,
+      undefined, // apiKey
+      doc.createdAt || new Date(),
       doc.lastLoginAt,
-      doc.active
+      doc.email,
+      doc.active ?? true,
+      doc.apiKeys || [],
+      doc.updatedAt
     );
   }
 
@@ -207,7 +208,7 @@ export class MongoUserRepository implements IUserRepository {
       role: user.role,
       apiKeys: user.apiKeys,
       createdAt: user.createdAt,
-      updatedAt: user.updatedAt,
+      updatedAt: user.updatedAt || new Date(),
       lastLoginAt: user.lastLoginAt,
       active: user.active
     };

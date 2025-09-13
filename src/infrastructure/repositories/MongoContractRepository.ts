@@ -198,4 +198,8 @@ export class MongoContractRepository implements IContractRepository {
       updatedAt: new Date()
     };
   }
+
+  async count(): Promise<number> {
+    return await this.collection.countDocuments();
+  }
 }

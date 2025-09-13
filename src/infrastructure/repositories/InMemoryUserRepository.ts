@@ -22,12 +22,13 @@ export class InMemoryUserRepository implements IUserRepository {
       'admin',
       defaultAdminPasswordHash,
       UserRole.ADMIN,
-      'admin@agora.local',
-      [],
-      new Date(),
-      new Date(),
-      undefined,
-      true
+      undefined, // apiKey
+      new Date(), // createdAt
+      undefined, // lastLoginAt
+      'admin@agora.local', // email
+      true, // active
+      [], // apiKeys
+      new Date() // updatedAt
     );
 
     this.users.set(defaultAdmin.id, defaultAdmin);

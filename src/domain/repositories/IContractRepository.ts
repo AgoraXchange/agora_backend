@@ -11,4 +11,5 @@ export interface IContractRepository {
   findContractsToClose(): Promise<Contract[]>;
   save(contract: Contract): Promise<void>;
   update(contract: Contract): Promise<void>;
+  count(): Promise<number>;
 }
