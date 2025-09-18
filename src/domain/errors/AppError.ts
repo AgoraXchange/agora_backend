@@ -49,4 +49,12 @@ export class AppError extends Error {
   static rateLimitExceeded(message = 'Rate limit exceeded'): AppError {
     return new AppError(ErrorCode.RATE_LIMIT_EXCEEDED, message, 429);
   }
+
+  static internal(message = 'Internal server error'): AppError {
+    return AppError.internalError(message);
+  }
+
+  static badRequest(message: string, details?: any): AppError {
+    return AppError.validationError(message, details);
+  }
 }

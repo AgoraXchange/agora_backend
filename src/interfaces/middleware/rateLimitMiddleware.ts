@@ -58,3 +58,23 @@ export const oracleRateLimiter = createRateLimiter(
   60 * 1000, // 1 minute
   isDevelopment ? 100 : 10 // More lenient in development
 );
+
+export const adminRateLimiter = createRateLimiter(
+  5 * 60 * 1000, // 5 minutes
+  isDevelopment ? 200 : 50 // Admin operations need higher limits
+);
+
+export const xffBypassMiddleware = (req: Request, res: Response, next: NextFunction) => {
+  const allowXffWithoutTrust = (process.env.ERL_ALLOW_XFF_WITHOUT_TRUST_PROXY || 'false').toLowerCase() === 'true';
+
+  if (allowXffWithoutTrust && req.headers['x-forwarded-for']) {
+    // Use Object.defineProperty to override the readonly ip property
+    Object.defineProperty(req, 'ip', {
+      value: (req.headers['x-forwarded-for'] as string).split(',')[0].trim(),
+      writable: true,
+      configurable: true
+    });
+  }
+
+  next();
+};

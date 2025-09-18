@@ -14,12 +14,15 @@ export interface JurySynthesisInput {
   /** Optional party display names to avoid placeholders */
   partyAName?: string;
   partyBName?: string;
+  /** Optional party positions/arguments for natural language reference */
+  partyAPosition?: string;
+  partyBPosition?: string;
 }
 
 export class ClaudeJurySynthesisService {
   private claude: Anthropic | null = null;
   private readonly model: string;
-  private readonly driver: 'local' | 'anthropic';
+  private driver: 'local' | 'anthropic';
 
   constructor() {
     const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -51,9 +54,6 @@ export class ClaudeJurySynthesisService {
 
   async generate(input: JurySynthesisInput): Promise<WinnerJuryArguments> {
     const { winnerId, messages, contractId } = input;
-    const winnerLabel = this.toPartyLabel(winnerId);
-    const winnerDisplay = this.toPartyDisplayName(winnerLabel, input.partyAName, input.partyBName);
-    const topicDisplay = (input.topic || '').trim() || (input.locale === 'ko' ? '해당 분쟁 주제' : 'the contract dispute');
 
     const supporting = messages
       .filter(m => m.messageType === 'proposal' && m.content?.winner === winnerId)
@@ -96,9 +96,28 @@ export class ClaudeJurySynthesisService {
     const header = `You are a careful logician. Build three distinct logical arguments that support the winner's natural-language claim using the provided evidence and context. Then derive a concise conclusion that follows inevitably from those arguments. Output strict JSON only.`;
     const ctxTopic = input.topic ? `Topic: ${limit(input.topic, 200)}` : '';
     const ctxDesc = input.description ? `Description: ${limit(input.description, 500)}` : '';
-    const partiesLine = (input.partyAName || input.partyBName)
-      ? `Participants: ${[input.partyAName, input.partyBName].filter(Boolean).map(n => limit(String(n), 120)).join(' vs ')}`
-      : '';
+
+    // Build participants section with names and positions
+    let partiesLine = '';
+    if (input.partyAName || input.partyBName) {
+      const parties = [input.partyAName, input.partyBName].filter(Boolean).map(n => limit(String(n), 120));
+      partiesLine = `Participants: ${parties.join(' vs ')}`;
+
+      // Add positions if available
+      if (input.partyAPosition || input.partyBPosition) {
+        const positions = [];
+        if (input.partyAName && input.partyAPosition) {
+          positions.push(`${input.partyAName}: ${limit(input.partyAPosition, 200)}`);
+        }
+        if (input.partyBName && input.partyBPosition) {
+          positions.push(`${input.partyBName}: ${limit(input.partyBPosition, 200)}`);
+        }
+        if (positions.length > 0) {
+          partiesLine += `\nPositions: ${positions.join(' | ')}`;
+        }
+      }
+    }
+
     const contextBlock = [ctxTopic, ctxDesc, partiesLine].filter(Boolean).join('\n');
 
     const instructions = `
@@ -109,9 +128,11 @@ Task:
 - Each of Jury1/2/3 should be a single, self-contained argument supported by one or more evidence pieces.
 - Conclusion must logically follow from Jury1–Jury3 without introducing new facts.
 - Output language: ${language}
-- When referring to participants, use the given names exactly (if provided) and do not use generic labels like "partyA" or "partyB".
+- When referring to participants, use their actual names and positions as provided in the context. Never use generic labels like "Party A", "Party B", "partyA", or "partyB".
+- If participant positions are provided, reference their specific arguments or stances rather than abstract labels.
+- Focus on the substantive content of their positions when making logical arguments.
 - Output format: a single compact JSON object with keys "Jury1", "Jury2", "Jury3", "Conclusion". No markdown, no code fences, no commentary.
- - Do not reference internal IDs anywhere; use natural language names only as listed in Entities.
+- Do not reference internal IDs anywhere; use natural language names and positions only.
 
 Available supporting items:
 ${capped.map((s, i) => `#${i + 1} Agent=${s.agent}\nRationale=${s.rationale}\nEvidence=${s.evidence.join(' | ')}`).join('\n\n')}
@@ -142,17 +163,17 @@ ${capped.map((s, i) => `#${i + 1} Agent=${s.agent}\nRationale=${s.rationale}\nEv
         }
 
         logger.warn('Claude jury synthesis returned unrecognized JSON, using fallback parse', { contractId });
-        return this.fallbackFromEvidence(capped, winnerClaim, input.locale, input.topic, input.description);
+        return this.fallbackFromEvidence(capped, winnerClaim, input.locale, input.topic, input.description, input.partyAName, input.partyBName, input.partyAPosition, input.partyBPosition);
       } catch (error) {
         logger.warn('Claude jury synthesis failed, using local fallback', {
           contractId,
           error: error instanceof Error ? error.message : 'Unknown error'
         });
-        return this.fallbackFromEvidence(capped, winnerClaim, input.locale, input.topic, input.description);
+        return this.fallbackFromEvidence(capped, winnerClaim, input.locale, input.topic, input.description, input.partyAName, input.partyBName, input.partyAPosition, input.partyBPosition);
       }
     }
 
-    return this.fallbackFromEvidence(capped, winnerClaim, input.locale, input.topic, input.description);
+    return this.fallbackFromEvidence(capped, winnerClaim, input.locale, input.topic, input.description, input.partyAName, input.partyBName, input.partyAPosition, input.partyBPosition);
   }
 
   private safeParseJSON(raw: string): any {
@@ -171,23 +192,82 @@ ${capped.map((s, i) => `#${i + 1} Agent=${s.agent}\nRationale=${s.rationale}\nEv
     return null;
   }
 
+  /**
+   * Map a partyId to a logical label. Heuristics:
+   * - IDs ending with ":1" (or containing it) map to partyA; ":2" to partyB
+   * - Fallback to last digit 1/2; default to partyA when unknown
+   */
+  private toPartyLabel(partyId: string): 'partyA' | 'partyB' {
+    const id = String(partyId || '').trim();
+    if (/:1\b/.test(id)) return 'partyA';
+    if (/:2\b/.test(id)) return 'partyB';
+    const last = id.slice(-1);
+    if (last === '1') return 'partyA';
+    if (last === '2') return 'partyB';
+    return 'partyA';
+  }
+
+  private toPartyDisplayName(
+    label: 'partyA' | 'partyB',
+    partyAName?: string,
+    partyBName?: string
+  ): string {
+    return label === 'partyA' ? (partyAName?.trim() || 'Party A') : (partyBName?.trim() || 'Party B');
+  }
+
   private fallbackFromEvidence(
     items: Array<{ agent: string; rationale: string; evidence: string[] }>,
     winnerClaim: string,
     locale: 'ko' | 'en' = 'en',
     topic?: string,
-    description?: string
+    description?: string,
+    partyAName?: string,
+    partyBName?: string,
+    partyAPosition?: string,
+    partyBPosition?: string
   ): WinnerJuryArguments {
     const text = (s: string) => s.replace(/\s+/g, ' ').trim();
+
+    // Build contextual references using natural language
+    const buildContextualRef = () => {
+      const parts = [];
+      if (topic) parts.push(topic);
+      if (partyAName && partyAPosition) {
+        parts.push(`${partyAName}: ${partyAPosition}`);
+      }
+      if (partyBName && partyBPosition) {
+        parts.push(`${partyBName}: ${partyBPosition}`);
+      }
+      return parts.length > 0 ? parts.join(' | ') : '';
+    };
+
+    const contextualRef = buildContextualRef();
+
     const arg = (i: number) => {
       const it = items[i % items.length];
       const ev = it?.evidence?.[0] || it?.rationale || '';
+      const rationale = text(it?.rationale || (locale === 'en' ? 'Supportive rationale' : '지지 논거'));
+
+      // Enhance with contextual information if available
+      const contextNote = contextualRef && i === 0 ?
+        (locale === 'en' ? ` considering ${contextualRef}` : ` ${contextualRef}을 고려할 때`) : '';
+
       return locale === 'en'
-        ? `Argument ${i + 1}: ${text(it?.rationale || 'Supportive rationale')} (evidence: ${text(ev)})`
-        : `주장 ${i + 1}: ${text(it?.rationale || '지지 논거')} (근거: ${text(ev)})`;
+        ? `Argument ${i + 1}: ${rationale}${contextNote} (evidence: ${text(ev)})`
+        : `주장 ${i + 1}: ${rationale}${contextNote} (근거: ${text(ev)})`;
     };
+
     const concl = () => {
       const ctxVals = [topic, description].filter((v): v is string => !!v);
+
+      // Include participant positions in context
+      if (partyAName && partyAPosition) {
+        ctxVals.push(`${partyAName}: ${partyAPosition}`);
+      }
+      if (partyBName && partyBPosition) {
+        ctxVals.push(`${partyBName}: ${partyBPosition}`);
+      }
+
       const ctx = ctxVals.map(text);
       const ctxLine = ctx.length > 0 ? (locale === 'en' ? `Context: ${ctx.join(' | ')}` : `맥락: ${ctx.join(' | ')}`) : '';
       const base = locale === 'en'
@@ -195,15 +275,12 @@ ${capped.map((s, i) => `#${i + 1} Agent=${s.agent}\nRationale=${s.rationale}\nEv
         : `위의 주장과 근거에 비추어 볼 때, 승자의 주장이 가장 타당합니다: ${text(winnerClaim)}`;
       return ctxLine ? `${ctxLine} ${base}` : base;
     };
-    
-    const conclusion = locale === 'en'
-      ? `Based on the comprehensive analysis above, '${winnerId}' emerges as the most supported winner.`
-      : `위의 종합적인 분석을 바탕으로, '${winnerId}'가 가장 지지받는 승자로 나타납니다.`;
-    
+    const conclusion = concl();
+
     return {
-      Jury1: generateArg(0),
-      Jury2: generateArg(1), 
-      Jury3: generateArg(2),
+      Jury1: arg(0),
+      Jury2: arg(1),
+      Jury3: arg(2),
       Conclusion: conclusion
     };
   }

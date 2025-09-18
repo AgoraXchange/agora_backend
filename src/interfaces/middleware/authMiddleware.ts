@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { container } from '../../container';
+import { TYPES } from '../../types';
 import { JwtService, JwtPayload } from '../../infrastructure/auth/JwtService';
 import { AppError } from '../../domain/errors/AppError';
 import { UserRole } from '../../domain/entities/User';
@@ -22,7 +23,7 @@ export function authenticate() {
       }
 
       const token = authHeader.substring(7);
-      const jwtService = container.get<JwtService>('JwtService');
+      const jwtService = container.get<JwtService>(TYPES.JwtService);
       const payload = jwtService.verifyAccessToken(token);
       
       req.user = payload;

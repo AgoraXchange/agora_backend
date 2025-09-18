@@ -5,6 +5,7 @@ import { WinnerJuryArguments } from '../../domain/valueObjects/WinnerJuryArgumen
 import { OracleDecision, DecisionMetadata } from '../../domain/entities/OracleDecision';
 import { MongoDBConnection } from '../database/MongoDBConnection';
 import { logger } from '../logging/Logger';
+import { TYPES } from '../../types';
 
 interface OracleDecisionDocument {
   _id: string;
@@ -24,7 +25,7 @@ export class MongoOracleDecisionRepository implements IOracleDecisionRepository 
   private collection: Collection<OracleDecisionDocument>;
 
   constructor(
-    @inject('MongoDBConnection') private dbConnection: MongoDBConnection
+    @inject(TYPES.MongoDBConnection) private dbConnection: MongoDBConnection
   ) {
     this.collection = this.dbConnection.getDb().collection<OracleDecisionDocument>('oracleDecisions');
     this.createIndexes();
@@ -105,5 +106,9 @@ export class MongoOracleDecisionRepository implements IOracleDecisionRepository 
       },
       createdAt: decision.createdAt
     };
+  }
+
+  async count(): Promise<number> {
+    return await this.collection.countDocuments();
   }
 }

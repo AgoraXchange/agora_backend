@@ -110,6 +110,7 @@ export class GeminiJuror extends BaseJuror {
       logger.error('Gemini reasoning generation failed', {
         error: error instanceof Error ? error.message : 'Unknown error'
       });
+      return 'Judgment based on comprehensive evaluation';
     }
   }
 

@@ -115,4 +115,8 @@ export class InMemoryContractRepository implements IContractRepository {
   async update(contract: Contract): Promise<void> {
     this.contracts.set(contract.id, contract);
   }
+
+  async count(): Promise<number> {
+    return this.contracts.size;
+  }
 }

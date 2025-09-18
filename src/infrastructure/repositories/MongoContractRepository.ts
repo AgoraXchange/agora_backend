@@ -6,6 +6,7 @@ import { Party } from '../../domain/entities/Party';
 import { BettingStats } from '../../domain/entities/BettingStats';
 import { MongoDBConnection } from '../database/MongoDBConnection';
 import { logger } from '../logging/Logger';
+import { TYPES } from '../../types';
 
 interface ContractDocument {
   _id: string;
@@ -39,7 +40,7 @@ export class MongoContractRepository implements IContractRepository {
   private collection: Collection<ContractDocument>;
 
   constructor(
-    @inject('MongoDBConnection') private dbConnection: MongoDBConnection
+    @inject(TYPES.MongoDBConnection) private dbConnection: MongoDBConnection
   ) {
     this.collection = this.dbConnection.getDb().collection<ContractDocument>('contracts');
     this.createIndexes();
@@ -197,5 +198,9 @@ export class MongoContractRepository implements IContractRepository {
       createdAt: new Date(),
       updatedAt: new Date()
     };
+  }
+
+  async count(): Promise<number> {
+    return await this.collection.countDocuments();
   }
 }

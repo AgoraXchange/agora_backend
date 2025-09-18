@@ -36,4 +36,8 @@ export class InMemoryOracleDecisionRepository implements IOracleDecisionReposito
       }
     }
   }
+
+  async count(): Promise<number> {
+    return this.decisions.size;
+  }
 }

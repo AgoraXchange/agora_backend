@@ -4,6 +4,7 @@ import { validate } from '../middleware/validationMiddleware';
 import { loginSchema } from '../validation/schemas';
 import { authRateLimiter } from '../middleware/rateLimitMiddleware';
 import { asyncHandler } from '../middleware/errorMiddleware';
+import { authenticate } from '../middleware/authMiddleware';
 
 export function createAuthRoutes(): Router {
   const router = Router();
@@ -18,6 +19,11 @@ export function createAuthRoutes(): Router {
   router.post('/refresh',
     authRateLimiter,
     asyncHandler((req, res) => controller.refreshToken(req, res))
+  );
+
+  router.get('/me',
+    authenticate(),
+    asyncHandler((req, res) => controller.getCurrentUser(req, res))
   );
 
   router.post('/logout',

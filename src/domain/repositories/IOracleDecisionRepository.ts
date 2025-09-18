@@ -6,4 +6,5 @@ export interface IOracleDecisionRepository {
   findByContractId(contractId: string): Promise<OracleDecision | null>;
   save(decision: OracleDecision): Promise<void>;
   saveWinnerArguments(contractId: string, args: WinnerJuryArguments): Promise<void>;
+  count(): Promise<number>;
 }

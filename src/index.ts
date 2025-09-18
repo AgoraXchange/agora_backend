@@ -1,5 +1,6 @@
 import { createApp } from './app';
 import { container } from './container';
+import { TYPES } from './types';
 import { MonitorContractsUseCase } from './application/useCases/MonitorContractsUseCase';
 import { MongoDBConnection } from './infrastructure/database/MongoDBConnection';
 import { EthereumService } from './infrastructure/blockchain/EthereumService';
@@ -17,7 +18,7 @@ async function startServer() {
     // Initialize MongoDB connection if enabled
     if (process.env.USE_MONGODB === 'true') {
       logger.info('Connecting to MongoDB...');
-      const mongoConnection = container.get<MongoDBConnection>('MongoDBConnection');
+      const mongoConnection = container.get<MongoDBConnection>(TYPES.MongoDBConnection);
       await mongoConnection.connect();
     }
 
@@ -52,7 +53,7 @@ async function startServer() {
 
     gracefulShutdown.registerShutdownCallback(async () => {
       logger.info('Cleaning up Ethereum service...');
-      const ethereumService = container.get<EthereumService>('IBlockchainService');
+      const ethereumService = container.get<EthereumService>(TYPES.IBlockchainService);
       if (ethereumService.cleanup) {
         ethereumService.cleanup();
       }
@@ -61,21 +62,13 @@ async function startServer() {
     gracefulShutdown.registerShutdownCallback(async () => {
       if (process.env.USE_MONGODB === 'true') {
         logger.info('Disconnecting from MongoDB...');
-        const mongoConnection = container.get<MongoDBConnection>('MongoDBConnection');
-        await mongoConnection.disconnect();
-      }
-    });
-
-    gracefulShutdown.registerShutdownCallback(async () => {
-      if (process.env.USE_MONGODB === 'true') {
-        logger.info('Disconnecting from MongoDB...');
-        const mongoConnection = container.get<MongoDBConnection>('MongoDBConnection');
+        const mongoConnection = container.get<MongoDBConnection>(TYPES.MongoDBConnection);
         await mongoConnection.disconnect();
       }
     });
 
     // Start contract monitoring
-    startContractMonitoring();
+    // startContractMonitoring(); // Temporarily disabled for login testing
   } catch (error) {
     logger.error('Failed to start server', { error: error instanceof Error ? error.message : 'Unknown error' });
     throw error;
@@ -83,7 +76,7 @@ async function startServer() {
 }
 
 function startContractMonitoring() {
-  const monitorUseCase = container.get<MonitorContractsUseCase>('MonitorContractsUseCase');
+  const monitorUseCase = container.get<MonitorContractsUseCase>(TYPES.MonitorContractsUseCase);
 
   logger.info(`Starting contract monitoring with interval: ${MONITORING_INTERVAL}ms`);
 

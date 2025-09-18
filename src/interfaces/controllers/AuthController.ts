@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { injectable } from 'inversify';
 import { container } from '../../container';
+import { TYPES } from '../../types';
 import { JwtService } from '../../infrastructure/auth/JwtService';
 import { AppError } from '../../domain/errors/AppError';
 import { User, UserRole } from '../../domain/entities/User';
@@ -16,11 +17,11 @@ export class AuthController {
     const hardcodedUser = {
       id: 'admin-1',
       username: 'admin',
-      passwordHash: await container.get<JwtService>('JwtService').hashPassword('admin123'),
+      passwordHash: await container.get<JwtService>(TYPES.JwtService).hashPassword('admin123'),
       role: UserRole.ADMIN
     };
 
-    const jwtService = container.get<JwtService>('JwtService');
+    const jwtService = container.get<JwtService>(TYPES.JwtService);
     
     if (username !== hardcodedUser.username) {
       throw AppError.unauthorized('Invalid credentials');
@@ -63,7 +64,7 @@ export class AuthController {
       throw AppError.unauthorized('Refresh token required');
     }
 
-    const jwtService = container.get<JwtService>('JwtService');
+    const jwtService = container.get<JwtService>(TYPES.JwtService);
     
     const payload = jwtService.verifyRefreshToken(refreshToken);
     
@@ -88,10 +89,29 @@ export class AuthController {
     });
   }
 
+  async getCurrentUser(req: Request, res: Response): Promise<void> {
+    const userId = req.user?.userId;
+    const username = req.user?.username;
+    const role = req.user?.role;
+
+    if (!userId || !username || !role) {
+      throw AppError.unauthorized('Invalid token payload');
+    }
+
+    res.json({
+      success: true,
+      data: {
+        id: userId,
+        username: username,
+        role: role
+      }
+    });
+  }
+
   async logout(req: Request, res: Response): Promise<void> {
     // TODO: Implement token blacklisting
     logger.info('User logged out', { userId: req.user?.userId });
-    
+
     res.json({
       success: true,
       message: 'Logged out successfully'

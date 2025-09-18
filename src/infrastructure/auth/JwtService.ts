@@ -9,6 +9,8 @@ export interface JwtPayload {
   userId: string;
   username: string;
   role: UserRole;
+  id: string; // alias for userId for admin controllers
+  name: string; // alias for username for admin controllers
 }
 
 export interface AuthTokens {
@@ -47,7 +49,9 @@ export class JwtService {
     const payload: JwtPayload = {
       userId: user.id,
       username: user.username,
-      role: user.role
+      role: user.role,
+      id: user.id, // alias for admin controllers
+      name: user.username // alias for admin controllers
     };
 
     const accessToken = (jwt as any).sign(payload, this.accessTokenSecret, {
