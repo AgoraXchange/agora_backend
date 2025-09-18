@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { injectable } from 'inversify';
 import { container } from '../../container';
+import { TYPES } from '../../types';
 import { DecideWinnerUseCase } from '../../application/useCases/DecideWinnerUseCase';
 import { IBlockchainService } from '../../domain/services/IBlockchainService';
 import { IContractRepository } from '../../domain/repositories/IContractRepository';
@@ -29,7 +30,7 @@ export class OracleController {
         return;
       }
 
-      const decideWinnerUseCase = container.get<DecideWinnerUseCase>('DecideWinnerUseCase');
+      const decideWinnerUseCase = container.get<DecideWinnerUseCase>(TYPES.DecideWinnerUseCase);
       const result = await decideWinnerUseCase.execute({ 
         contractId,
         forceCommitteeMode,
@@ -89,7 +90,7 @@ export class OracleController {
       // Add a small delay to ensure SSE connection is established first
       setTimeout(() => {
         console.log('⏱️ Starting deliberation after delay to ensure SSE connection');
-        const decideWinnerUseCase = container.get<DecideWinnerUseCase>('DecideWinnerUseCase');
+        const decideWinnerUseCase = container.get<DecideWinnerUseCase>(TYPES.DecideWinnerUseCase);
         decideWinnerUseCase.executeAsync({ 
           contractId,
           deliberationId,
@@ -158,9 +159,9 @@ export class OracleController {
         return;
       }
 
-      const blockchain = container.get<IBlockchainService>('IBlockchainService');
-      const contracts = container.get<IContractRepository>('IContractRepository');
-      const coordinator = container.get<DecisionCoordinator>('DecisionCoordinator');
+      const blockchain = container.get<IBlockchainService>(TYPES.IBlockchainService);
+      const contracts = container.get<IContractRepository>(TYPES.IContractRepository);
+      const coordinator = container.get<DecisionCoordinator>(TYPES.DecisionCoordinator);
 
       let onchainStatus: number | null = null;
       let onchainEnd: number | null = null;
@@ -260,7 +261,7 @@ export class OracleController {
       try {
         // Use coordinator to avoid duplicate trigger if monitor also picks it up
         if (coordinator.tryStart(String(pathId))) {
-          const decideWinnerUseCase = container.get<DecideWinnerUseCase>('DecideWinnerUseCase');
+          const decideWinnerUseCase = container.get<DecideWinnerUseCase>(TYPES.DecideWinnerUseCase);
           const deliberationId = `committee_${pathId}_${Date.now()}`;
           decideWinnerUseCase.executeAsync({ contractId: String(pathId), deliberationId })
             .catch(err => {
@@ -297,9 +298,9 @@ export class OracleController {
     try {
       const { contractId } = req.params;
       const lang = (req.query.lang as string) === 'ko' ? 'ko' : 'en';
-      const decisionRepo = container.get<IOracleDecisionRepository>('IOracleDecisionRepository');
-      const emitter = container.get<DeliberationEventEmitter>('DeliberationEventEmitter');
-      const contracts = container.get<IContractRepository>('IContractRepository');
+      const decisionRepo = container.get<IOracleDecisionRepository>(TYPES.IOracleDecisionRepository);
+      const emitter = container.get<DeliberationEventEmitter>(TYPES.DeliberationEventEmitter);
+      const contracts = container.get<IContractRepository>(TYPES.IContractRepository);
 
       const decision = await decisionRepo.findByContractId(String(contractId));
       if (!decision) {
@@ -351,7 +352,7 @@ export class OracleController {
       let partyBName: string | undefined;
       let topic: string | undefined;
       try {
-        const contracts = container.get<IContractRepository>('IContractRepository');
+        const contracts = container.get<IContractRepository>(TYPES.IContractRepository);
         const contract = await contracts.findById(String(contractId));
         if (contract) {
           partyAName = contract.partyA?.name || undefined;

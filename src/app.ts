@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import { createOracleRoutes } from './interfaces/routes/oracleRoutes';
 import { createAuthRoutes } from './interfaces/routes/authRoutes';
 import { createDeliberationRoutes } from './interfaces/routes/deliberationRoutes';
+import { createAdminRoutes } from './interfaces/routes/adminRoutes';
 import { errorHandler, notFoundHandler } from './interfaces/middleware/errorMiddleware';
 import { apiRateLimiter, xffBypassMiddleware } from './interfaces/middleware/rateLimitMiddleware';
 import { logger } from './infrastructure/logging/Logger';
@@ -45,6 +46,7 @@ export function createApp() {
   // CORS configuration (robust origin parsing + flexible headers)
   const defaultDevOrigins = [
     'http://localhost:3000',
+    'http://localhost:3002',
     'http://localhost:5173',
     'http://localhost:5174',
     'http://127.0.0.1:5173',
@@ -56,6 +58,9 @@ export function createApp() {
     .map(o => o.trim())
     .filter(o => o.length > 0);
   const allowedOrigins = envOrigins.length > 0 ? envOrigins : defaultDevOrigins;
+
+  // Debug: log allowed origins
+  logger.info('CORS allowed origins', { allowedOrigins });
 
   const originPatterns = (process.env.ALLOWED_ORIGINS_REGEX || '')
     .split(',')
@@ -183,6 +188,7 @@ export function createApp() {
   app.use('/api/auth', createAuthRoutes());
   app.use('/api/oracle', createOracleRoutes());
   app.use('/api/deliberations', createDeliberationRoutes());
+  app.use('/api/admin', createAdminRoutes());
 
   // 404 handler
   app.use(notFoundHandler);

@@ -41,3 +41,6 @@ __pycache__/
 .env/
 venv/
 env/
+
+# admin frontend
+admin-frontend/

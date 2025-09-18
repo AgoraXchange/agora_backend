@@ -5,6 +5,7 @@ import { IBlockchainService, ContractData } from '../../domain/services/IBlockch
 import { Choice } from '../../domain/entities/Choice';
 import { BettingStats, ContractEventData, BetPlacedEvent, BetRevealedEvent } from '../../domain/entities/BettingStats';
 import { CryptoService } from '../auth/CryptoService';
+import { TYPES } from '../../types';
 import { logger } from '../logging/Logger';
 
 @injectable()
@@ -25,7 +26,7 @@ export class EthereumService implements IBlockchainService {
   private readonly FILTER_REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minutes
 
   constructor(
-    @inject('CryptoService') private cryptoService: CryptoService
+    @inject(TYPES.CryptoService) private cryptoService: CryptoService
   ) {
     const rpcUrl = process.env.ETHEREUM_RPC_URL || 'http://localhost:8545';
     const useReal = process.env.USE_REAL_BLOCKCHAIN === 'true';
@@ -160,16 +161,39 @@ export class EthereumService implements IBlockchainService {
       });
 
       return receipt.hash;
-    } catch (error) {
+    } catch (error: any) {
+      let errorDetails = 'Unknown error';
+      let revertReason = 'Unknown';
+
+      // Extract detailed error information
+      if (error?.reason) {
+        revertReason = error.reason;
+        errorDetails = error.reason;
+      } else if (error?.data) {
+        errorDetails = `Transaction reverted: ${error.data}`;
+      } else if (error?.message) {
+        errorDetails = error.message;
+        // Try to extract revert reason from message
+        const match = error.message.match(/reason="([^"]+)"/);
+        if (match) {
+          revertReason = match[1];
+        }
+      }
+
       let onchainOracle: string | undefined;
       try { onchainOracle = await this.getOnChainOracleAddress(); } catch {}
+
       logger.error('Blockchain closeBetting error', {
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: errorDetails,
+        revertReason,
         contractId,
         signer: this.wallet?.address,
-        oracle: onchainOracle
+        oracle: onchainOracle,
+        transactionData: error?.transaction,
+        receipt: error?.receipt
       });
-      throw new Error('Failed to close betting on blockchain');
+
+      throw new Error(`Failed to close betting on blockchain: ${revertReason}`);
     }
   }
 

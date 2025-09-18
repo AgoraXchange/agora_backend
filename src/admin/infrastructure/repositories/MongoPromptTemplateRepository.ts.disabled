@@ -1,0 +1,384 @@
+import { inject, injectable } from 'inversify';
+import { Collection, Db, ObjectId } from 'mongodb';
+import {
+  IPromptTemplateRepository,
+  PromptTemplateFilter,
+  PromptTemplatePagination,
+  PromptTemplateQueryResult
+} from '../../domain/repositories/IPromptTemplateRepository';
+import { PromptTemplate, PromptCategory, PromptLanguage, PromptStatus } from '../../domain/entities/PromptTemplate';
+import { TYPES } from '../../../types';
+
+interface PromptTemplateDocument {
+  _id?: ObjectId;
+  id: string;
+  name: string;
+  category: PromptCategory;
+  language: PromptLanguage;
+  status: PromptStatus;
+  template: string;
+  variables: string[];
+  description?: string;
+  version: string;
+  isActive: boolean;
+  successRate?: number;
+  averageResponseTime?: number;
+  usageCount: number;
+  performanceMetrics: Array<{
+    version: string;
+    successRate: number;
+    averageResponseTime: number;
+    usageCount: number;
+    lastUpdated: Date;
+  }>;
+  createdBy: string;
+  createdAt: Date;
+  updatedAt: Date;
+  tags: string[];
+  notes?: string;
+}
+
+@injectable()
+export class MongoPromptTemplateRepository implements IPromptTemplateRepository {
+  private collection: Collection<PromptTemplateDocument>;
+
+  constructor(@inject(TYPES.MongoClient) db: Db) {
+    this.collection = db.collection<PromptTemplateDocument>('promptTemplates');
+    this.ensureIndexes();
+  }
+
+  private async ensureIndexes(): Promise<void> {
+    await this.collection.createIndex({ id: 1 }, { unique: true });
+    await this.collection.createIndex({ category: 1, language: 1, status: 1 });
+    await this.collection.createIndex({ isActive: 1 });
+    await this.collection.createIndex({ name: 'text', description: 'text' });
+    await this.collection.createIndex({ createdAt: -1 });
+    await this.collection.createIndex({ usageCount: -1 });
+    await this.collection.createIndex({ tags: 1 });
+  }
+
+  async findById(id: string): Promise<PromptTemplate | null> {
+    const doc = await this.collection.findOne({ id });
+    return doc ? this.mapToEntity(doc) : null;
+  }
+
+  async findMany(
+    filter?: PromptTemplateFilter,
+    pagination?: PromptTemplatePagination
+  ): Promise<PromptTemplateQueryResult> {
+    const query = this.buildQuery(filter);
+    const skip = pagination ? (pagination.page - 1) * pagination.limit : 0;
+    const limit = pagination?.limit || 50;
+
+    const sortOptions = this.buildSortOptions(pagination);
+
+    const [templates, total] = await Promise.all([
+      this.collection.find(query).sort(sortOptions).skip(skip).limit(limit).toArray(),
+      this.collection.countDocuments(query)
+    ]);
+
+    return {
+      templates: templates.map(doc => this.mapToEntity(doc)),
+      total,
+      page: pagination?.page || 1,
+      totalPages: Math.ceil(total / limit)
+    };
+  }
+
+  async findActiveByCategory(
+    category: PromptCategory,
+    language: PromptLanguage
+  ): Promise<PromptTemplate | null> {
+    const doc = await this.collection.findOne({
+      category,
+      language,
+      status: PromptStatus.ACTIVE,
+      isActive: true
+    });
+    return doc ? this.mapToEntity(doc) : null;
+  }
+
+  async findVersions(templateId: string): Promise<PromptTemplate | null> {
+    // In a more sophisticated system, you might have separate version documents
+    // For now, return the main template which contains performance metrics for different versions
+    return this.findById(templateId);
+  }
+
+  async save(template: PromptTemplate): Promise<void> {
+    const doc = this.mapToDocument(template);
+    await this.collection.replaceOne({ id: template.id }, doc, { upsert: true });
+  }
+
+  async update(template: PromptTemplate): Promise<void> {
+    const doc = this.mapToDocument(template);
+    await this.collection.replaceOne({ id: template.id }, doc);
+  }
+
+  async delete(id: string): Promise<void> {
+    await this.collection.deleteOne({ id });
+  }
+
+  async getUsageStats(templateIds?: string[]): Promise<Array<{
+    templateId: string;
+    name: string;
+    category: PromptCategory;
+    totalUsage: number;
+    successRate: number;
+    averageResponseTime: number;
+    lastUsed?: Date;
+  }>> {
+    const query = templateIds ? { id: { $in: templateIds } } : {};
+
+    const docs = await this.collection.find(query).toArray();
+
+    return docs.map(doc => ({
+      templateId: doc.id,
+      name: doc.name,
+      category: doc.category,
+      totalUsage: doc.usageCount,
+      successRate: doc.successRate || 0,
+      averageResponseTime: doc.averageResponseTime || 0,
+      lastUsed: doc.performanceMetrics.length > 0
+        ? doc.performanceMetrics[doc.performanceMetrics.length - 1].lastUpdated
+        : undefined
+    }));
+  }
+
+  async findTemplatesForPerformanceUpdate(
+    category?: PromptCategory
+  ): Promise<PromptTemplate[]> {
+    const query: any = {
+      status: PromptStatus.ACTIVE,
+      isActive: true,
+      $or: [
+        { successRate: { $lt: 0.8 } },
+        { averageResponseTime: { $gt: 5000 } },
+        { usageCount: { $gt: 100 } }
+      ]
+    };
+
+    if (category) {
+      query.category = category;
+    }
+
+    const docs = await this.collection.find(query).toArray();
+    return docs.map(doc => this.mapToEntity(doc));
+  }
+
+  async updatePerformanceMetrics(
+    templateId: string,
+    version: string,
+    successRate?: number,
+    responseTime?: number,
+    incrementUsage?: boolean
+  ): Promise<void> {
+    const updateQuery: any = {
+      updatedAt: new Date()
+    };
+
+    if (successRate !== undefined) {
+      updateQuery.successRate = successRate;
+    }
+
+    if (responseTime !== undefined) {
+      updateQuery.averageResponseTime = responseTime;
+    }
+
+    if (incrementUsage) {
+      updateQuery.$inc = { usageCount: 1 };
+    }
+
+    // Update performance metrics array
+    if (successRate !== undefined || responseTime !== undefined) {
+      updateQuery.$push = {
+        performanceMetrics: {
+          version,
+          successRate: successRate || 0,
+          averageResponseTime: responseTime || 0,
+          usageCount: 1,
+          lastUpdated: new Date()
+        }
+      };
+    }
+
+    await this.collection.updateOne({ id: templateId }, updateQuery);
+  }
+
+  async count(filter?: PromptTemplateFilter): Promise<number> {
+    const query = this.buildQuery(filter);
+    return this.collection.countDocuments(query);
+  }
+
+  async findByTag(tag: string): Promise<PromptTemplate[]> {
+    const docs = await this.collection.find({ tags: tag }).toArray();
+    return docs.map(doc => this.mapToEntity(doc));
+  }
+
+  async findSimilarNames(name: string, excludeId?: string): Promise<PromptTemplate[]> {
+    const query: any = {
+      name: { $regex: new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') }
+    };
+
+    if (excludeId) {
+      query.id = { $ne: excludeId };
+    }
+
+    const docs = await this.collection.find(query).toArray();
+    return docs.map(doc => this.mapToEntity(doc));
+  }
+
+  async archiveOldVersions(templateId: string, keepVersions: number): Promise<void> {
+    const template = await this.findById(templateId);
+    if (!template) return;
+
+    const doc = await this.collection.findOne({ id: templateId });
+    if (!doc || doc.performanceMetrics.length <= keepVersions) return;
+
+    const metricsToKeep = doc.performanceMetrics
+      .sort((a, b) => b.lastUpdated.getTime() - a.lastUpdated.getTime())
+      .slice(0, keepVersions);
+
+    await this.collection.updateOne(
+      { id: templateId },
+      {
+        $set: {
+          performanceMetrics: metricsToKeep,
+          updatedAt: new Date()
+        }
+      }
+    );
+  }
+
+  async exportTemplates(filter?: PromptTemplateFilter): Promise<string> {
+    const query = this.buildQuery(filter);
+    const docs = await this.collection.find(query).toArray();
+    const templates = docs.map(doc => this.mapToEntity(doc));
+    return JSON.stringify(templates, null, 2);
+  }
+
+  async importTemplates(templatesJson: string, importedBy: string): Promise<{
+    imported: number;
+    skipped: number;
+    errors: string[];
+  }> {
+    const result = { imported: 0, skipped: 0, errors: [] as string[] };
+
+    try {
+      const templates = JSON.parse(templatesJson) as PromptTemplate[];
+
+      for (const templateData of templates) {
+        try {
+          const existing = await this.findById(templateData.id);
+          if (existing) {
+            result.skipped++;
+            continue;
+          }
+
+          const template = new PromptTemplate(
+            templateData.id,
+            templateData.name,
+            templateData.category,
+            templateData.language,
+            templateData.template,
+            templateData.variables,
+            templateData.status,
+            templateData.description,
+            templateData.version,
+            templateData.isActive,
+            templateData.successRate,
+            templateData.averageResponseTime,
+            templateData.usageCount,
+            templateData.performanceMetrics,
+            importedBy,
+            new Date(),
+            new Date(),
+            templateData.tags,
+            `Imported: ${templateData.notes || ''}`
+          );
+
+          await this.save(template);
+          result.imported++;
+        } catch (error) {
+          result.errors.push(`Template ${templateData.id}: ${error.message}`);
+        }
+      }
+    } catch (error) {
+      result.errors.push(`JSON parsing error: ${error.message}`);
+    }
+
+    return result;
+  }
+
+  private buildQuery(filter?: PromptTemplateFilter): any {
+    const query: any = {};
+
+    if (filter?.category) query.category = filter.category;
+    if (filter?.language) query.language = filter.language;
+    if (filter?.status) query.status = filter.status;
+    if (filter?.createdBy) query.createdBy = filter.createdBy;
+    if (filter?.tags?.length) query.tags = { $in: filter.tags };
+
+    if (filter?.search) {
+      query.$text = { $search: filter.search };
+    }
+
+    return query;
+  }
+
+  private buildSortOptions(pagination?: PromptTemplatePagination): any {
+    if (!pagination?.sortBy) {
+      return { createdAt: -1 };
+    }
+
+    const sortOrder = pagination.sortOrder === 'asc' ? 1 : -1;
+    return { [pagination.sortBy]: sortOrder };
+  }
+
+  private mapToEntity(doc: PromptTemplateDocument): PromptTemplate {
+    return new PromptTemplate(
+      doc.id,
+      doc.name,
+      doc.category,
+      doc.language,
+      doc.template,
+      doc.variables,
+      doc.status,
+      doc.description,
+      doc.version,
+      doc.isActive,
+      doc.successRate,
+      doc.averageResponseTime,
+      doc.usageCount,
+      doc.performanceMetrics,
+      doc.createdBy,
+      doc.createdAt,
+      doc.updatedAt,
+      doc.tags,
+      doc.notes
+    );
+  }
+
+  private mapToDocument(template: PromptTemplate): PromptTemplateDocument {
+    return {
+      id: template.id,
+      name: template.name,
+      category: template.category,
+      language: template.language,
+      status: template.status,
+      template: template.template,
+      variables: template.variables,
+      description: template.description,
+      version: template.version,
+      isActive: template.isActive,
+      successRate: template.successRate,
+      averageResponseTime: template.averageResponseTime,
+      usageCount: template.usageCount,
+      performanceMetrics: template.performanceMetrics,
+      createdBy: template.createdBy,
+      createdAt: template.createdAt,
+      updatedAt: template.updatedAt,
+      tags: template.tags,
+      notes: template.notes
+    };
+  }
+}

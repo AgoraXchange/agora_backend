@@ -4,6 +4,7 @@ import { IUserRepository } from '../../domain/repositories/IUserRepository';
 import { User, UserRole, ApiKey } from '../../domain/entities/User';
 import { MongoDBConnection } from '../database/MongoDBConnection';
 import { logger } from '../logging/Logger';
+import { TYPES } from '../../types';
 
 interface UserDocument {
   _id: string;
@@ -23,7 +24,7 @@ export class MongoUserRepository implements IUserRepository {
   private collection: Collection<UserDocument>;
 
   constructor(
-    @inject('MongoDBConnection') private dbConnection: MongoDBConnection
+    @inject(TYPES.MongoDBConnection) private dbConnection: MongoDBConnection
   ) {
     this.collection = this.dbConnection.getDb().collection<UserDocument>('users');
     this.createIndexes();

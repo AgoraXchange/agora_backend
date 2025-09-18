@@ -4,6 +4,7 @@ import { IActivityLogRepository } from '../../domain/repositories/IActivityLogRe
 import { ActivityLog, ActivityAction, ActivityMetadata } from '../../domain/entities/ActivityLog';
 import { MongoDBConnection } from '../database/MongoDBConnection';
 import { logger } from '../logging/Logger';
+import { TYPES } from '../../types';
 
 interface ActivityLogDocument {
   _id: string;
@@ -23,7 +24,7 @@ export class MongoActivityLogRepository implements IActivityLogRepository {
   private collection: Collection<ActivityLogDocument>;
 
   constructor(
-    @inject('MongoDBConnection') private dbConnection: MongoDBConnection
+    @inject(TYPES.MongoDBConnection) private dbConnection: MongoDBConnection
   ) {
     this.collection = this.dbConnection.getDb().collection<ActivityLogDocument>('activityLogs');
     this.createIndexes();

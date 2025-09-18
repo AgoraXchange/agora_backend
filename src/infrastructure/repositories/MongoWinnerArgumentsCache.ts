@@ -4,6 +4,7 @@ import { IWinnerArgumentsCache } from '../../domain/repositories/IWinnerArgument
 import { WinnerJuryArguments } from '../../domain/valueObjects/WinnerJuryArguments';
 import { MongoDBConnection } from '../database/MongoDBConnection';
 import { logger } from '../logging/Logger';
+import { TYPES } from '../../types';
 
 interface WinnerArgsDocument {
   _id: string; // contractId
@@ -16,7 +17,7 @@ export class MongoWinnerArgumentsCache implements IWinnerArgumentsCache {
   private collection: Collection<WinnerArgsDocument>;
   private ttlSeconds: number | null;
 
-  constructor(@inject('MongoDBConnection') private db: MongoDBConnection) {
+  constructor(@inject(TYPES.MongoDBConnection) private db: MongoDBConnection) {
     this.collection = this.db.getDb().collection<WinnerArgsDocument>('winnerArguments');
     const ttlMs = process.env.WINNER_ARGS_CACHE_TTL_MS ? parseInt(process.env.WINNER_ARGS_CACHE_TTL_MS, 10) : null;
     this.ttlSeconds = ttlMs ? Math.floor(ttlMs / 1000) : null;
